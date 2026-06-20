@@ -121,7 +121,12 @@ let ws: WebSocket | null = null
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
 
 export function connectWebSocket(url = 'ws://localhost:8080') {
-  if (ws) ws.close()
+  // Idempotent: if a socket is already connecting or open, don't tear it down.
+  // (React StrictMode mounts components twice in dev, which would otherwise
+  // close the first socket mid-handshake and force a needless reconnect.)
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    return
+  }
 
   ws = new WebSocket(url)
 
@@ -140,13 +145,14 @@ export function connectWebSocket(url = 'ws://localhost:8080') {
   }
 
   ws.onclose = () => {
+    if (reconnectTimeout) return // a reconnect is already scheduled
     console.warn('[WS] Disconnected. Reconnecting in 3s…')
-    reconnectTimeout = setTimeout(() => connectWebSocket(url), 3000)
+    reconnectTimeout = setTimeout(() => { reconnectTimeout = null; connectWebSocket(url) }, 3000)
   }
 
-  ws.onerror = (e) => {
-    console.error('[WS] Error', e)
-    ws?.close()
+  ws.onerror = () => {
+    // onclose fires right after onerror and handles reconnection.
+    console.warn('[WS] Connection error (will retry)')
   }
 }
 
