@@ -1,0 +1,19 @@
+[project]
+name = "voice-agent"
+version = "0.1.0"
+description = "Realtime voice agent — Pipecat orchestration with Deepgram Flux turn-taking, Cartesia TTS, and Sentry observability"
+requires-python = ">=3.10"
+dependencies = [
+    # Pipecat with the extras we need:
+    #   webrtc   -> SmallWebRTCTransport (aiortc based, peer-to-peer with the browser)
+    #   runner   -> the FastAPI development runner (serves /api/offer on :7860)
+    #   deepgram -> Deepgram STT (Flux service with built-in end-of-turn detection)
+    #   cartesia -> Cartesia TTS
+    #   openai   -> OpenAI-compatible chat completions LLM service
+    #   silero   -> Silero VAD (only used on the fallback STT path)
+    "pipecat-ai[webrtc,runner,deepgram,cartesia,openai,silero]>=0.0.100",
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    # Observability: errors + tracing for the voice pipeline.
+    "sentry-sdk[loguru]>=2.0",
+]
