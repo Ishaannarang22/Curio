@@ -1,10 +1,33 @@
 @AGENTS.md
 
-# Sentry (error monitoring + tracing)
+# Curio — docs index & working agreement
+
+Curio is a **voice-first, AI-companion note-taking app**. A student talks through a
+topic out loud (the Feynman technique) and the system builds a living tldraw
+whiteboard of structured notes, diagrams, and study artifacts in real time. Voice is
+the primary input; the board is the primary output.
+
+## Project docs (read the relevant one before working on a feature)
+
+| Doc | What's in it |
+| --- | --- |
+| [idea.md](./idea.md) | The **why** — product vision, the Feynman core bet, what the AI companion does, modes, product principles. |
+| [prd.md](./prd.md) | The **what** — the capture→structure loop, source-of-truth/data model, editing rules, non-goals, decision log, open product questions. |
+| [implementation.md](./implementation.md) | The **how** — agents & pipeline topology, tech stack, voice-agent integration contract, Sentry agent observability. |
+
+These three are living docs split out of the original product brief. When a decision
+changes, update the relevant doc (and the decision log in [prd.md](./prd.md)); keep
+this `CLAUDE.md` a thin index.
+
+# Sentry (error monitoring + tracing + agent observability)
 
 This project uses the **`@sentry/nextjs`** SDK (v10) for error monitoring,
-performance tracing, session replay, and logs. Notes below are from the
+performance tracing, session replay, logs, and **agent call/usage observability**.
+Notes below are from the
 [official Next.js guide](https://docs.sentry.io/platforms/javascript/guides/nextjs/).
+
+> For instrumenting the agent pipeline specifically (per-agent spans + token usage),
+> see [implementation.md](./implementation.md) §"Sentry agent observability".
 
 ## How the SDK is wired up
 
