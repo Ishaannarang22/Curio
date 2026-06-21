@@ -15,6 +15,7 @@ BlockRecord fields:
 """
 
 import json
+import re
 import time
 from typing import Any
 
@@ -22,6 +23,11 @@ import sentry_sdk
 from loguru import logger
 
 import redis.asyncio as aioredis
+
+
+def _redact_url(url: str) -> str:
+    """Replace any password in a Redis URL with '***' before logging."""
+    return re.sub(r"(:)[^:@/]+(@)", r"\1***\2", url)
 
 # Default Redis URL; callers may override via constructor.
 _DEFAULT_REDIS_URL = "redis://localhost:6379"
@@ -92,7 +98,8 @@ class BoardState:
             )
             # Ping to surface connection errors early.
             await self._client.ping()
-            logger.info(f"BoardState connected: session={self._session!r} url={self._redis_url}")
+            # Log the URL with any embedded password redacted.
+            logger.info(f"BoardState connected: session={self._session!r} url={_redact_url(self._redis_url)}")
         except Exception as exc:
             logger.error(f"BoardState.connect failed (Redis may be down): {exc}")
             sentry_sdk.capture_exception(exc)

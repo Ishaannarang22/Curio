@@ -32,6 +32,28 @@ from loguru import logger
 WHITEBOARD_SEND_URL: str = os.getenv("WHITEBOARD_SEND_URL", "http://localhost:8081/send")
 
 # ---------------------------------------------------------------------------
+# Content size caps — prevent unbounded data from landing in Redis / the bridge.
+# LLM max_tokens is already 2000 tokens (~8 KB), but we cap defensively here
+# in case a future caller raises that limit or tool args arrive from another path.
+# ---------------------------------------------------------------------------
+
+_MAX_CONTENT_BYTES = 64 * 1024   # 64 KB per block content / markdown field
+_MAX_TITLE_CHARS   = 500         # generous but bounded block title
+_MAX_LABEL_CHARS   = 500         # flowchart step / mind-map branch label
+_MAX_STEPS         = 100         # max flowchart steps per call
+_MAX_BRANCHES      = 100         # max mind-map branches per call
+
+
+def _clamp_str(s: str, max_chars: int, field: str = "field") -> str:
+    """Truncate *s* to *max_chars* characters, logging a warning if truncated."""
+    if len(s) > max_chars:
+        logger.warning(
+            f"board_tools: {field!r} truncated from {len(s)} to {max_chars} chars"
+        )
+        return s[:max_chars]
+    return s
+
+# ---------------------------------------------------------------------------
 # Layout constants (simple grid packing — real geometry comes back via M4)
 # ---------------------------------------------------------------------------
 
@@ -540,8 +562,8 @@ async def _write_notes(
     active_topic: str,
 ) -> dict[str, Any]:
     block_id: str = args["id"]
-    title: str = args.get("title", "")
-    markdown: str = args.get("markdown", "")
+    title: str = _clamp_str(args.get("title", ""), _MAX_TITLE_CHARS, "title")
+    markdown: str = _clamp_str(args.get("markdown", ""), _MAX_CONTENT_BYTES, "markdown")
     anchor: dict[str, Any] | None = args.get("anchor")
 
     pos = await resolve_placement(state, block_id, anchor)
@@ -574,8 +596,16 @@ async def _make_flowchart(
     active_topic: str,
 ) -> dict[str, Any]:
     block_id: str = args["id"]
-    title: str = args.get("title", "")
-    steps: list[dict[str, Any]] = args.get("steps", [])
+    title: str = _clamp_str(args.get("title", ""), _MAX_TITLE_CHARS, "title")
+    # Cap step count and per-step label lengths to bound Redis write size.
+    raw_steps: list[dict[str, Any]] = args.get("steps", [])
+    if len(raw_steps) > _MAX_STEPS:
+        logger.warning(f"board_tools: flowchart steps truncated from {len(raw_steps)} to {_MAX_STEPS}")
+        raw_steps = raw_steps[:_MAX_STEPS]
+    steps: list[dict[str, Any]] = [
+        {**s, "label": _clamp_str(s.get("label", ""), _MAX_LABEL_CHARS, "step.label")}
+        for s in raw_steps
+    ]
     anchor: dict[str, Any] | None = args.get("anchor")
 
     pos = await resolve_placement(state, block_id, anchor)
@@ -614,8 +644,16 @@ async def _make_mindmap(
     active_topic: str,
 ) -> dict[str, Any]:
     block_id: str = args["id"]
-    center_label: str = args.get("center", "")
-    branches: list[dict[str, Any]] = args.get("branches", [])
+    center_label: str = _clamp_str(args.get("center", ""), _MAX_LABEL_CHARS, "center")
+    # Cap branch count and per-branch label lengths to bound Redis write size.
+    raw_branches: list[dict[str, Any]] = args.get("branches", [])
+    if len(raw_branches) > _MAX_BRANCHES:
+        logger.warning(f"board_tools: mindmap branches truncated from {len(raw_branches)} to {_MAX_BRANCHES}")
+        raw_branches = raw_branches[:_MAX_BRANCHES]
+    branches: list[dict[str, Any]] = [
+        {**b, "label": _clamp_str(b.get("label", ""), _MAX_LABEL_CHARS, "branch.label")}
+        for b in raw_branches
+    ]
     anchor: dict[str, Any] | None = args.get("anchor")
 
     pos = await resolve_placement(state, block_id, anchor)
@@ -657,8 +695,9 @@ async def _add_image(
     active_topic: str,
 ) -> dict[str, Any]:
     block_id: str = args["id"]
-    prompt: str = args.get("prompt", "")
-    caption: str | None = args.get("caption")
+    prompt: str = _clamp_str(args.get("prompt", ""), _MAX_TITLE_CHARS, "prompt")
+    caption_raw: str | None = args.get("caption")
+    caption: str | None = _clamp_str(caption_raw, _MAX_TITLE_CHARS, "caption") if caption_raw else None
     anchor: dict[str, Any] | None = args.get("anchor")
 
     pos = await resolve_placement(state, block_id, anchor)

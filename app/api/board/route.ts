@@ -43,6 +43,11 @@ interface BlockRecord {
 interface GeometryUpdate { id: string; bbox: BBox }
 
 // ─── Validation helpers ────────────────────────────────────────────────────────
+
+// Maximum number of geometry updates accepted in a single batched POST.
+// Prevents a single request from spawning an unbounded number of Redis R-M-W ops.
+const MAX_UPDATES_PER_REQUEST = 200
+
 function isValidSession(s: unknown): s is string {
   return typeof s === 'string' && s.length > 0 && s.length <= 128 && /^[\w\-:.]+$/.test(s)
 }
@@ -84,13 +89,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'missing id/bbox or updates array' }, { status: 400 })
   }
 
+  // Cap batch size to prevent a single request from flooding Redis.
+  if (updates.length > MAX_UPDATES_PER_REQUEST) {
+    return NextResponse.json({ error: 'too many updates' }, { status: 400 })
+  }
+
   // Validate each update entry.
+  // Note: error messages deliberately omit the submitted value to avoid reflecting
+  // attacker-controlled strings back in the response.
   for (const u of updates) {
     if (!isValidId(u.id)) {
-      return NextResponse.json({ error: `invalid id: ${String(u.id)}` }, { status: 400 })
+      return NextResponse.json({ error: 'invalid id in updates' }, { status: 400 })
     }
     if (!isValidBBox(u.bbox)) {
-      return NextResponse.json({ error: `invalid bbox for id: ${u.id}` }, { status: 400 })
+      return NextResponse.json({ error: 'invalid bbox in updates' }, { status: 400 })
     }
   }
 
