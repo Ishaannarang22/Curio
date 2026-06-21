@@ -88,8 +88,12 @@ that and adds the three phases + tool-calling + Redis.
     bbox:{x,y,w,h}}]`.
   - **user content:** the turn's final transcript.
   - **tools:** the `tools.md` surface (native OpenAI `tools`, parallel calls).
-- Model: Sonnet via Vercel AI Gateway; GLM-5 fallback (resolution mirrors
-  `_resolve_caller_config`).
+- Model: a **fast, reliable tool-caller**, pinned via `CALLER_MODEL` and resolved
+  **independently of the speaking agent** — it does *not* inherit the
+  Gateway→NVIDIA→ZAI order (Nemotron is too weak at tool calls). v1 default:
+  **GLM-5 turbo** (the fast variant) on the ZAI endpoint, chosen for low latency
+  since this runs every turn; upgrades to **Claude Sonnet** when
+  `AI_GATEWAY_API_KEY` is present.
 - Returns `tool_calls`.
 - Every block written is tagged in Redis with its **`topicId`** (the active topic
   thread), so a topic can own several blocks while it is being captured.
