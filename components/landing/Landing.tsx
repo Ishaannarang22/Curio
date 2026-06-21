@@ -7,10 +7,11 @@ import '@fontsource/inter/700.css'
 import '@fontsource/jetbrains-mono/500.css'
 import '@fontsource/jetbrains-mono/600.css'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
 import Hero from './Hero'
 import BoardScene from './BoardScene'
-import Story from './Story'
+import FeynmanSection from './sections/FeynmanSection'
 import ClosingCTA from './ClosingCTA'
 import './landing.css'
 
@@ -18,8 +19,18 @@ import './landing.css'
  * Landing — Curio's marketing front door. Client component (motion + the
  * reused Orb need the browser). Self-contained: all styles are namespaced
  * under .lp- so the app routes are untouched.
+ *
+ * Every child is a full-viewport section; the page uses proximity scroll-snap
+ * (enabled by toggling .lp-snap-root on <html> only while mounted, so the
+ * behavior never leaks into the app routes).
  */
 export default function Landing() {
+  useEffect(() => {
+    const html = document.documentElement
+    html.classList.add('lp-snap-root')
+    return () => html.classList.remove('lp-snap-root')
+  }, [])
+
   return (
     <div className="lp-root">
       <div className="lp-ambient" aria-hidden />
@@ -43,11 +54,15 @@ export default function Landing() {
       <main className="lp-content">
         <Hero />
 
-        <section className="lp-scene-wrap" aria-label="A live demonstration of Curio building a board">
+        <section
+          className="lp-section--full lp-scene-wrap"
+          aria-label="A live demonstration of Curio building a board"
+        >
           <BoardScene />
         </section>
 
-        <Story />
+        <FeynmanSection />
+
         <ClosingCTA />
       </main>
     </div>

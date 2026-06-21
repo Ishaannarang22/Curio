@@ -1,0 +1,304 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Curio landing — "Honest by design" full-viewport section.
+   Scoped under .gaps- to avoid global collisions. Inherits CSS custom
+   properties from .lp-root (palette, fonts).
+
+   SIGNATURE EFFECT — LIGHT SINKS INWARD (a dark well):
+   The visual inverse of light radiating out. A recessed radial "pit" reads as
+   a funnel via strong INSET shadows (page tone at the rim → near-black core).
+   A conic sheen spirals INWARD and faint streaks fall toward the center,
+   dimming as they're swallowed. The open "gap" chip carries an inward inset
+   glow that darkens toward its center — light bending into the unknown — while
+   the settled "known" chips stay solid and lit (teal). Pink = unresolved.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.gaps-grid {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 64px;
+}
+
+/* ─── Copy column ─────────────────────────────────────────────────────────── */
+.gaps-copy {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+}
+
+.gaps-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 22px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--lp-pink);
+}
+.gaps-kicker__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lp-pink);
+  box-shadow: 0 0 10px var(--lp-pink);
+}
+
+.gaps-title {
+  margin: 0;
+  max-width: 18ch;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: clamp(30px, 3.9vw, 52px);
+  line-height: 1.07;
+  font-weight: 600;
+  letter-spacing: -0.032em;
+  color: var(--lp-ink);
+}
+.gaps-title__em {
+  font-style: normal;
+  background: linear-gradient(100deg, #ffffff 0%, #f9a8d4 55%, #ec4899 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.gaps-body {
+  margin: 22px 0 0;
+  max-width: 46ch;
+  font-size: clamp(15px, 1.6vw, 17px);
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--lp-muted);
+}
+
+/* ─── Stage (right column) ────────────────────────────────────────────────── */
+.gaps-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 460px;
+}
+
+/* ─── The dark well ───────────────────────────────────────────────────────── */
+.gaps-well {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: min(500px, 92%);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  /* Layered radial: page tone at rim, sinking to a deep near-black core. */
+  background:
+    radial-gradient(circle at 50% 50%,
+      #000000 0%,
+      #020203 16%,
+      #050507 34%,
+      rgba(10, 10, 15, 0.85) 52%,
+      rgba(12, 12, 18, 0.4) 70%,
+      transparent 84%);
+  /* INSET shadows are what make it read as a recessed pit, not a glowing orb. */
+  box-shadow:
+    inset 0 0 60px 20px rgba(0, 0, 0, 0.95),
+    inset 0 0 140px 40px rgba(0, 0, 0, 0.8),
+    inset 0 0 4px 1px rgba(255, 255, 255, 0.05);
+}
+
+/* Funnel rim — a faint lit lip that falls off into the pit. */
+.gaps-well__pit {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%,
+      transparent 38%,
+      rgba(236, 72, 153, 0.05) 58%,
+      rgba(139, 92, 246, 0.06) 70%,
+      transparent 86%);
+  box-shadow:
+    inset 0 0 50px 8px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Conic sheen spiralling inward — light drifting toward the swallow point. */
+.gaps-well__spiral {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(236, 72, 153, 0.10) 40deg,
+      transparent 90deg,
+      rgba(139, 92, 246, 0.08) 150deg,
+      transparent 210deg,
+      rgba(59, 130, 246, 0.07) 280deg,
+      transparent 330deg
+    );
+  /* Fade the sheen toward the core so light "dims" as it falls in. */
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 24%, #000 46%, #000 70%, transparent 88%);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 24%, #000 46%, #000 70%, transparent 88%);
+  filter: blur(2px);
+}
+
+/* Radial streaks falling inward. Each parent is rotated; the line scales toward
+   center via the inline framer animation, dimming as it's swallowed. */
+.gaps-well__streaks {
+  position: absolute;
+  inset: 0;
+}
+.gaps-streak {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 46%;
+  transform-origin: 50% 0;
+  /* `transform: rotate(...)` is set inline per streak. */
+}
+.gaps-streak__line {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Bright at the outer end, fading to nothing at the inner (core) end. */
+  transform-origin: 50% 0; /* anchored at the rim, scales toward center */
+  background: linear-gradient(
+    to bottom,
+    rgba(249, 168, 212, 0) 0%,
+    rgba(249, 168, 212, 0.55) 30%,
+    rgba(236, 72, 153, 0.2) 75%,
+    transparent 100%
+  );
+  filter: blur(0.5px);
+}
+
+/* The breathing dark core — the point that swallows the light. */
+.gaps-well__core {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 34%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #000 0%, #000 55%, rgba(0, 0, 0, 0.7) 78%, transparent 100%);
+  box-shadow:
+    inset 0 0 30px 6px rgba(0, 0, 0, 1),
+    0 0 24px 6px rgba(0, 0, 0, 0.7);
+}
+
+/* ─── Chips ───────────────────────────────────────────────────────────────── */
+.gaps-chips {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, 100%);
+}
+
+.gaps-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  border-radius: 13px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  will-change: transform, filter;
+}
+
+/* Settled knowledge — solid, lit, sitting proud of the surface (teal). */
+.gaps-chip--known {
+  background:
+    linear-gradient(180deg, rgba(45, 212, 191, 0.12), rgba(45, 212, 191, 0.06)),
+    var(--lp-bg-2);
+  border: 1px solid rgba(45, 212, 191, 0.34);
+  color: #9af0e2;
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.45),
+    0 0 22px rgba(45, 212, 191, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Open gap — drawn INTO the well: inward inset glow darkening toward center,
+   plus a recessed feel. The opposite of the lit, raised "known" chips. */
+.gaps-chip--gap {
+  background:
+    radial-gradient(120% 160% at 50% 50%, rgba(0, 0, 0, 0.55) 0%, transparent 62%),
+    linear-gradient(180deg, rgba(236, 72, 153, 0.1), rgba(236, 72, 153, 0.04)),
+    #060608;
+  border: 1px solid rgba(236, 72, 153, 0.4);
+  color: #f8b5d4;
+  /* Inset glow that darkens toward the center — light bending inward. */
+  box-shadow:
+    inset 0 0 26px 4px rgba(0, 0, 0, 0.85),
+    inset 0 0 14px 2px rgba(236, 72, 153, 0.16),
+    0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.gaps-chip__icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gaps-chip--known .gaps-chip__icon { color: var(--lp-teal); }
+.gaps-chip--gap .gaps-chip__icon { color: var(--lp-pink); }
+
+.gaps-chip__text { flex: 1; }
+
+/* The "open thread" badge on gap chips. */
+.gaps-chip__tag {
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lp-pink);
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(236, 72, 153, 0.3);
+  background: rgba(236, 72, 153, 0.07);
+}
+
+/* ─── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 880px) {
+  .gaps-grid {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+  .gaps-stage {
+    min-height: 420px;
+    order: 2;
+  }
+  .gaps-well { width: min(440px, 86%); }
+}
+@media (max-width: 520px) {
+  .gaps-chips { width: 100%; }
+  .gaps-chip__tag { display: none; }
+  .gaps-well { width: 100%; }
+}
+
+/* ─── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .gaps-well__spiral,
+  .gaps-well__core,
+  .gaps-streak__line {
+    animation: none !important;
+  }
+}

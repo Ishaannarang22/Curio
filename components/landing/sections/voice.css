@@ -1,0 +1,281 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Curio landing — "The harness" full-viewport section.
+   Scoped under .voice- to avoid global collisions. Inherits CSS custom
+   properties from .lp-root (palette, fonts). Dark, near-black, additive glow,
+   restrained color accents — mirrors landing.css but owns its own styles.
+
+   Signature: a central reactive waveform (the "one voice") feeding a ring of
+   five specialized agents. Bar glow + the core halo brighten and dim with the
+   waveform amplitude (driven by framer-motion in VoiceSection.tsx); the agent
+   nodes pulse on the same cadence so the whole scene reads as one→many.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.voice-root {
+  overflow: hidden;
+}
+
+.voice-grid {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 64px;
+}
+
+/* ─── Copy column ───────────────────────────────────────────────────────── */
+.voice-copy {
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-kicker {
+  margin: 0 0 18px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--lp-teal);
+}
+
+.voice-title {
+  margin: 0 0 22px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: clamp(28px, 3.6vw, 44px);
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  max-width: 16ch;
+}
+
+.voice-body {
+  margin: 0;
+  font-size: clamp(15px, 1.6vw, 17px);
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--lp-muted);
+  max-width: 48ch;
+}
+.voice-body + .voice-body { margin-top: 14px; }
+
+/* ─── Agent legend ──────────────────────────────────────────────────────── */
+.voice-legend {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.voice-legend__item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--lp-hairline);
+}
+.voice-legend__item:last-child { border-bottom: none; }
+.voice-legend__dot {
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c, var(--lp-teal));
+  box-shadow: 0 0 9px var(--c, var(--lp-teal));
+}
+.voice-legend__label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--lp-ink);
+}
+.voice-legend__desc {
+  font-size: 13px;
+  color: var(--lp-faint);
+}
+
+/* ─── Stage column ──────────────────────────────────────────────────────── */
+.voice-stagewrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-stage {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  aspect-ratio: 1 / 1;
+}
+
+/* Reactive ambient bloom behind the whole scene. */
+.voice-stage__bloom {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(45, 212, 191, 0.18) 0%, transparent 58%),
+    radial-gradient(circle at 38% 42%, rgba(59, 130, 246, 0.12) 0%, transparent 62%),
+    radial-gradient(circle at 64% 60%, rgba(139, 92, 246, 0.12) 0%, transparent 62%);
+  filter: blur(14px);
+  will-change: opacity, transform;
+}
+
+/* Orbit ring guides. */
+.voice-stage__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 80%;
+  height: 80%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid var(--lp-hairline);
+  pointer-events: none;
+}
+.voice-stage__ring--inner {
+  width: 46%;
+  height: 46%;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Connector spokes (SVG fills the stage). */
+.voice-spokes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ─── Agent nodes on the orbit ──────────────────────────────────────────── */
+.voice-agent {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 13px;
+  border-radius: 13px;
+  background:
+    radial-gradient(130% 120% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 62%),
+    var(--lp-bg-2);
+  border: 1px solid var(--lp-hairline);
+  white-space: nowrap;
+  /* Base shadow; framer-motion animates box-shadow for the reactive pulse. */
+  box-shadow: 0 0 0 1px var(--lp-hairline), 0 0 12px -4px var(--c, var(--lp-teal));
+  will-change: box-shadow, transform;
+}
+.voice-agent__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c, var(--lp-teal));
+  box-shadow: 0 0 10px var(--c, var(--lp-teal));
+}
+.voice-agent__name {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--lp-ink);
+}
+
+/* ─── Central voice core + reactive waveform ────────────────────────────── */
+.voice-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  padding: 18px 22px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(45, 212, 191, 0.26);
+  background:
+    radial-gradient(120% 130% at 50% 0%, rgba(45, 212, 191, 0.08), transparent 60%),
+    var(--lp-bg-2);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.5);
+}
+
+/* The halo behind the bars — framer-motion pulses its opacity/scale with the
+   waveform amplitude, so the glow reads as reactive to the voice. */
+.voice-core__glow {
+  position: absolute;
+  inset: -42%;
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(45, 212, 191, 0.30) 0%,
+    rgba(59, 130, 246, 0.14) 42%,
+    transparent 70%);
+  filter: blur(10px);
+  will-change: opacity, transform;
+}
+
+.voice-core__label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lp-teal);
+}
+
+/* The reactive waveform: teal→blue vertical-gradient bars. */
+.voice-wave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 84px;
+}
+.voice-wave__bar {
+  width: 5px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--lp-teal) 0%, var(--lp-blue) 100%);
+  transform-origin: center;
+  will-change: transform, filter, opacity;
+  /* Static fallback bloom (reduced motion / first paint). */
+  filter: drop-shadow(0 0 3px rgba(45, 212, 191, 0.45));
+}
+
+/* ─── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .voice-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    justify-items: center;
+    text-align: center;
+  }
+  .voice-copy { align-items: center; }
+  .voice-title { max-width: 18ch; }
+  .voice-legend { text-align: left; }
+  .voice-stage { max-width: 400px; }
+}
+@media (max-width: 480px) {
+  .voice-stage { max-width: 320px; }
+  .voice-agent { padding: 9px 10px; }
+  .voice-agent__name { font-size: 10px; }
+}
+
+/* ─── Reduced motion ────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .voice-stage__bloom,
+  .voice-core__glow {
+    opacity: 0.7;
+  }
+}

@@ -1,0 +1,325 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   LoopSection — "The loop".
+   Signature effect: LIGHT EMITS / RADIATES OUTWARD from behind the central
+   figure card. A bright radial+conic light source sits behind the card (lower
+   z-index); the card floats on top with a thin rim of edge-light where the
+   backlight wraps it. Volumetric godray beams fan out into the dark page,
+   colored with the blue/teal/purple node family. All classes are uniquely
+   prefixed `loop-`.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.loop-wrap {
+  position: relative;
+  display: grid;
+  grid-template-columns: 0.92fr 1.08fr;
+  gap: 64px;
+  align-items: center;
+  width: 100%;
+}
+
+/* ── Copy column ───────────────────────────────────────────────────────────*/
+.loop-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--lp-blue);
+}
+.loop-kicker__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lp-blue);
+  box-shadow: 0 0 10px var(--lp-blue);
+}
+.loop-title {
+  margin: 0 0 22px;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--lp-ink);
+}
+.loop-title em {
+  font-style: normal;
+  background: linear-gradient(100deg, #ffffff 0%, #9fd9d2 45%, #c9c4ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.loop-body {
+  margin: 0;
+  font-size: 16.5px;
+  line-height: 1.62;
+  color: var(--lp-muted);
+  max-width: 48ch;
+}
+.loop-body + .loop-body { margin-top: 15px; }
+
+/* ── Stage — holds the emitted light behind + the figure on top ────────────*/
+.loop-stage {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  isolation: isolate;            /* keep the screen-blend light contained */
+}
+
+/* ── THE EMITTED LIGHT (sits BEHIND the figure, lower z-index) ─────────────*/
+.loop-light {
+  position: absolute;
+  inset: -22%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Core bloom: a hot bright center that bleeds blue→teal→purple into the dark.
+   This is the halo that escapes around the card's edges. */
+.loop-light__bloom {
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0) 26%),
+    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.55) 0%, rgba(59, 130, 246, 0) 48%),
+    radial-gradient(circle at 50% 50%, rgba(45, 212, 191, 0.40) 0%, rgba(45, 212, 191, 0) 62%),
+    radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.34) 0%, rgba(139, 92, 246, 0) 78%);
+  filter: blur(26px);
+  mix-blend-mode: screen;        /* additive feel on dark bg */
+  animation: loop-breathe 7.5s ease-in-out infinite;
+}
+
+/* Volumetric godrays — a conic beam fan that rotates slowly outward. */
+.loop-light__rays {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(96, 165, 250, 0.20) 8deg,
+      transparent 24deg,
+      rgba(45, 212, 191, 0.16) 46deg,
+      transparent 70deg,
+      rgba(139, 92, 246, 0.18) 96deg,
+      transparent 120deg,
+      rgba(96, 165, 250, 0.16) 150deg,
+      transparent 178deg,
+      rgba(45, 212, 191, 0.18) 210deg,
+      transparent 236deg,
+      rgba(139, 92, 246, 0.16) 274deg,
+      transparent 300deg,
+      rgba(96, 165, 250, 0.18) 330deg,
+      transparent 352deg
+    );
+  /* fade the rays out toward the rim so they read as beams, not a disk */
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 18%, #000 34%, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 18%, #000 34%, transparent 72%);
+  filter: blur(7px);
+  mix-blend-mode: screen;
+  opacity: 0.9;
+  animation: loop-spin 38s linear infinite;
+}
+
+/* A second, counter-rotating ray layer for richer volumetric depth. */
+.loop-light__rays--alt {
+  background:
+    conic-gradient(
+      from 18deg,
+      transparent 0deg,
+      rgba(255, 255, 255, 0.14) 6deg,
+      transparent 30deg,
+      rgba(45, 212, 191, 0.14) 64deg,
+      transparent 104deg,
+      rgba(96, 165, 250, 0.14) 150deg,
+      transparent 196deg,
+      rgba(139, 92, 246, 0.14) 250deg,
+      transparent 300deg,
+      rgba(255, 255, 255, 0.12) 338deg,
+      transparent 358deg
+    );
+  animation: loop-spin-rev 54s linear infinite;
+  opacity: 0.7;
+}
+
+/* Faint outer glow ring lingering at the card's edge — the "escape" halo. */
+.loop-light__ring {
+  position: absolute;
+  inset: 24%;
+  border-radius: 50%;
+  box-shadow:
+    0 0 60px 8px rgba(59, 130, 246, 0.35),
+    0 0 120px 30px rgba(45, 212, 191, 0.18);
+  mix-blend-mode: screen;
+  animation: loop-breathe 7.5s ease-in-out infinite;
+  animation-delay: -2s;
+}
+
+/* ── THE FIGURE CARD (on top of the light) ─────────────────────────────────*/
+.loop-card {
+  position: relative;
+  z-index: 2;
+  width: min(86%, 380px);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  /* dark glass so the backlight reads as escaping around the rim */
+  background:
+    radial-gradient(120% 120% at 50% 18%, rgba(255, 255, 255, 0.06), transparent 60%),
+    rgba(8, 9, 14, 0.86);
+  border: 1px solid var(--lp-hairline-strong);
+  /* edge-light: a bright rim where the backlight wraps the card */
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 40px 2px rgba(59, 130, 246, 0.20) inset,
+    0 0 1px 1px rgba(255, 255, 255, 0.35),
+    0 30px 90px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* the orbit ring the cycle nodes sit on */
+.loop-orbit {
+  position: absolute;
+  inset: 13%;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+/* SVG cycle arrows drawn on the orbit */
+.loop-cycle-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+.loop-cycle-svg path {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+/* center hub label */
+.loop-hub {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.loop-hub__mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 60%),
+    #0b0b10;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.45);
+  margin-bottom: 4px;
+}
+.loop-hub__word {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--lp-faint);
+}
+
+/* the three cycle nodes positioned around the orbit */
+.loop-node {
+  position: absolute;
+  z-index: 4;
+  width: 132px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.loop-node--1 { left: 50%;   top: 8%; }
+.loop-node--2 { left: 87%;   top: 72%; }
+.loop-node--3 { left: 13%;   top: 72%; }
+
+.loop-node__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(12, 14, 20, 0.92);
+  border: 1px solid var(--chip-ring, var(--lp-hairline-strong));
+  color: var(--chip-ink, var(--lp-ink));
+  box-shadow: 0 0 18px -2px var(--chip-glow, transparent), 0 8px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+.loop-node__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chip-ink, currentColor);
+  box-shadow: 0 0 8px var(--chip-ink, currentColor);
+}
+.loop-node__desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--lp-faint);
+  max-width: 15ch;
+}
+
+.loop-node--blue   { --chip-ink: #7fb0ff; --chip-ring: rgba(59, 130, 246, 0.5);  --chip-glow: rgba(59, 130, 246, 0.45); }
+.loop-node--teal   { --chip-ink: #6fe9d6; --chip-ring: rgba(45, 212, 191, 0.5);  --chip-glow: rgba(45, 212, 191, 0.45); }
+.loop-node--purple { --chip-ink: #b69bff; --chip-ring: rgba(139, 92, 246, 0.5);  --chip-glow: rgba(139, 92, 246, 0.45); }
+
+/* ── Animations ────────────────────────────────────────────────────────────*/
+@keyframes loop-breathe {
+  0%, 100% { opacity: 0.78; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.06); }
+}
+@keyframes loop-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes loop-spin-rev {
+  to { transform: rotate(-360deg); }
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────────*/
+@media (max-width: 900px) {
+  .loop-wrap {
+    grid-template-columns: 1fr;
+    gap: 44px;
+  }
+  .loop-stage { max-width: 440px; }
+}
+@media (max-width: 520px) {
+  .loop-node { width: 112px; }
+  .loop-node__chip { font-size: 11.5px; padding: 7px 12px; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────*/
+@media (prefers-reduced-motion: reduce) {
+  .loop-light__bloom,
+  .loop-light__rays,
+  .loop-light__rays--alt,
+  .loop-light__ring {
+    animation: none !important;
+  }
+}

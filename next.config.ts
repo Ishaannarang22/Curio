@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)",
           },
+          // Required for Sentry browser JS profiling (browserProfilingIntegration).
+          { key: "Document-Policy", value: "js-profiling" },
         ],
       },
     ];

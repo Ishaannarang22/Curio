@@ -176,7 +176,7 @@ def _init_sentry() -> bool:
         # 1.0 captures every transaction. Lower (~0.1) in production.
         traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "1.0")),
         integrations=[LoguruIntegration()],
-        send_default_pii=False,
+        send_default_pii=os.getenv("SENTRY_SEND_PII", "false").lower() in ("1", "true", "yes"),
     )
     sentry_sdk.set_tag("service", "voice-agent")
     logger.info("Sentry enabled for the voice agent.")

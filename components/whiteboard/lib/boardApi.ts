@@ -507,6 +507,11 @@ export async function addMindMap(
     }
   }
 
+  // Let each node's ResizeObserver grow it to fit its label BEFORE laying out,
+  // so the force sim's collide radius (below) uses real, grown sizes and nodes
+  // can't overlap each other once their text settles.
+  await sleep(160)
+
   // Run d3-force layout
   await runD3ForceLayout(editor, centerId, branches.map((b) => b.id))
 
@@ -557,10 +562,20 @@ async function runD3ForceLayout(
   // (forceCenter would re-center the centroid each tick and fight the fixed
   // node, causing the whole cloud to drift). Charge repels branches apart,
   // link springs them to the center, collide prevents overlap.
+  // Collide radius is per-node, derived from each node's REAL (grown) size, so a
+  // node with a long multi-line label still gets enough clearance from siblings.
+  const collideRadius = (d: FNode): number => {
+    const tlId = getTLId(d.id)
+    const s = tlId ? editor.getShape(tlId) : undefined
+    const props = s?.props as { w?: number; h?: number } | undefined
+    const w = props?.w ?? 140
+    const h = props?.h ?? 44
+    return Math.hypot(w, h) / 2 + 16
+  }
   const sim = forceSimulation<FNode>(nodes)
     .force('link', forceLink<FNode, FLink>(links).id((d) => d.id).distance(180).strength(0.9))
     .force('charge', forceManyBody().strength(-600))
-    .force('collide', forceCollide(85))
+    .force('collide', forceCollide<FNode>().radius(collideRadius).strength(1))
     .stop()
 
   // Tick to convergence off-screen (deterministic, no visual thrash).
@@ -616,6 +631,11 @@ export async function addFlowchart(
       connectNodes(editor, steps[i].id, steps[i + 1].id, undefined, true)
     }
   })
+
+  // Let each node's ResizeObserver grow it to fit its label BEFORE ELK lays the
+  // chart out, so runElkLayout reads real (grown) heights and the vertical
+  // spacing between steps can't collapse into an overlap.
+  await sleep(160)
 
   await runElkLayout(editor, steps, position)
 

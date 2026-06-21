@@ -72,6 +72,31 @@
   z-index: 1;
 }
 
+/* ─── Full-page scroll scaffolding ───────────────────────────────────────────
+   Applied to <html> only while the landing is mounted (see Landing.tsx), so the
+   smooth/snap behavior never leaks into the app routes. Snap is `proximity` so
+   sections settle to the viewport without ever trapping free/trackpad scroll. */
+html.lp-snap-root {
+  scroll-behavior: smooth;
+  scroll-snap-type: y proximity;
+}
+
+/* The base full-viewport section. Centers its content vertically and declares a
+   snap point at its top. Sections own their inner layout + bespoke light FX. */
+.lp-section--full {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+  padding: 96px 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.lp-snap-root { scroll-snap-type: none; scroll-behavior: auto; }
+}
+
 .lp-shell {
   width: 100%;
   max-width: var(--lp-maxw);
@@ -169,14 +194,22 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
-  padding: 56px 24px 40px;
+  /* Exactly one viewport — never taller. Inner content is sized to fit. */
+  height: 100svh;
+  min-height: 540px;
+  max-height: 100svh;
+  padding: 88px 24px 32px;
+  overflow: hidden;
+  scroll-snap-align: start;
 }
 .lp-hero__orb {
   position: relative;
-  width: clamp(220px, 42vw, 360px);
-  height: clamp(220px, 42vw, 360px);
-  margin-bottom: 6px;
+  width: clamp(180px, 30vh, 300px);
+  height: clamp(180px, 30vh, 300px);
+  margin-bottom: 4px;
+  flex-shrink: 0;
 }
 .lp-hero__orb-glow {
   position: absolute;

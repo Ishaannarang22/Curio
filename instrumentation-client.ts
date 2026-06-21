@@ -4,30 +4,61 @@
 
 import * as Sentry from "@sentry/nextjs";
 
-const isProduction = process.env.NODE_ENV === "production";
-
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
 
-  // Add optional integrations for additional features
-  integrations: [Sentry.replayIntegration()],
+  // ---- Maximum telemetry ----------------------------------------------------
+  // Capture everything regardless of environment. Dial the sample rates down if
+  // Sentry quota becomes a concern; this config favors completeness over cost.
 
-  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-  tracesSampleRate: isProduction ? 0.1 : 1,
-  // Enable logs to be sent to Sentry
-  enableLogs: !isProduction,
+  integrations: [
+    // Distributed tracing across browser → API.
+    Sentry.browserTracingIntegration(),
+    // Browser JS profiling (requires the `Document-Policy: js-profiling` header,
+    // set in next.config.ts).
+    Sentry.browserProfilingIntegration(),
+    // Session Replay — record the full DOM. We unmask text/media so the tldraw
+    // board and copy are visible, but keep credential inputs masked (see below).
+    Sentry.replayIntegration({
+      maskAllText: false,
+      blockAllMedia: false,
+      maskAllInputs: false,
+      // Security carve-out: never record typed credentials in replays.
+      mask: ['input[type="password"]', "[data-sentry-mask]"],
+      // Capture request/response headers + bodies in the replay timeline.
+      networkDetailAllowUrls: [
+        typeof window !== "undefined" ? window.location.origin : "",
+      ],
+      networkCaptureBodies: true,
+    }),
+    // Record the tldraw <canvas> inside session replays.
+    Sentry.replayCanvasIntegration(),
+    // Forward console.* calls into Sentry structured logs.
+    Sentry.consoleLoggingIntegration({
+      levels: ["log", "info", "warn", "error", "debug"],
+    }),
+  ],
 
-  // Define how likely Replay events are sampled.
-  // This sets the sample rate to be 10%. You may want this to be 100% while
-  // in development and sample at a lower rate in production
-  replaysSessionSampleRate: isProduction ? 0 : 0.1,
+  // Trace 100% of transactions.
+  tracesSampleRate: 1.0,
+  // Profile 100% of sampled transactions.
+  profilesSampleRate: 1.0,
 
-  // Define how likely Replay events are sampled when an error occurs.
-  replaysOnErrorSampleRate: isProduction ? 0.1 : 1.0,
+  // Ship structured logs to Sentry.
+  enableLogs: true,
 
-  // Enable sending user PII (Personally Identifiable Information)
-  // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-  sendDefaultPii: false,
+  // Record every session, and every session that hits an error.
+  replaysSessionSampleRate: 1.0,
+  replaysOnErrorSampleRate: 1.0,
+
+  // Propagate trace headers to our own origin so spans link browser → server.
+  tracePropagationTargets: [
+    /^\//,
+    typeof window !== "undefined" ? window.location.origin : "",
+  ],
+
+  // Capture IP, headers, cookies, and request bodies for richer context.
+  sendDefaultPii: true,
   beforeSend(event) {
     if (event.request?.url) {
       event.request.url = event.request.url.replace(/([?&]session=)[^&]+/g, "$1[Filtered]");

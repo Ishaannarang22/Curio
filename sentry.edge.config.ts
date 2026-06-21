@@ -5,20 +5,28 @@
 
 import * as Sentry from "@sentry/nextjs";
 
-const isProduction = process.env.NODE_ENV === "production";
-
 Sentry.init({
   dsn: process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN,
 
-  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-  tracesSampleRate: isProduction ? 0.1 : 1,
+  // ---- Maximum telemetry ----------------------------------------------------
+  // Capture everything regardless of environment. (Profiling is not available
+  // in the edge runtime, so it is omitted here.)
 
-  // Enable logs to be sent to Sentry
-  enableLogs: !isProduction,
+  integrations: [
+    // Forward console.* calls into Sentry structured logs.
+    Sentry.consoleLoggingIntegration({
+      levels: ["log", "info", "warn", "error", "debug"],
+    }),
+  ],
 
-  // Enable sending user PII (Personally Identifiable Information)
-  // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-  sendDefaultPii: false,
+  // Trace 100% of edge transactions.
+  tracesSampleRate: 1.0,
+
+  // Ship structured logs to Sentry.
+  enableLogs: true,
+
+  // Capture IP, headers, cookies, and request bodies for richer context.
+  sendDefaultPii: true,
   beforeSend(event) {
     if (event.request?.url) {
       event.request.url = event.request.url.replace(/([?&]session=)[^&]+/g, "$1[Filtered]");

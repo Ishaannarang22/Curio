@@ -1,0 +1,331 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Curio landing — "The core bet" full-viewport section.
+   Scoped under .fey- to avoid global collisions. Inherits CSS custom
+   properties from .lp-root (palette, fonts). Dark, near-black, additive glow,
+   restrained color accents — mirrors landing.css but owns its own styles.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.fey-wrap {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 30px;
+}
+
+/* Section-local ambient glow living behind the headline. */
+.fey-glow {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  width: min(900px, 90%);
+  height: 520px;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(45% 50% at 50% 50%, rgba(139, 92, 246, 0.16) 0%, transparent 70%),
+    radial-gradient(40% 45% at 28% 60%, rgba(45, 212, 191, 0.10) 0%, transparent 72%),
+    radial-gradient(40% 45% at 74% 40%, rgba(59, 130, 246, 0.10) 0%, transparent 72%);
+  filter: blur(8px);
+}
+
+/* ─── Kicker ────────────────────────────────────────────────────────────── */
+.fey-kicker {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--lp-purple);
+}
+.fey-kicker__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lp-purple);
+  box-shadow: 0 0 10px var(--lp-purple);
+}
+
+/* ─── Headline ──────────────────────────────────────────────────────────── */
+.fey-head {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  max-width: 20ch;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: clamp(34px, 5.6vw, 62px);
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.034em;
+}
+.fey-head em {
+  font-style: normal;
+  background: linear-gradient(100deg, #ffffff 0%, #c9c4ff 48%, #9fd9d2 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.fey-sub {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  max-width: 52ch;
+  font-size: clamp(15px, 1.7vw, 18.5px);
+  line-height: 1.55;
+  font-weight: 400;
+  color: var(--lp-muted);
+}
+
+/* ─── Talking vs Typing contrast ────────────────────────────────────────── */
+.fey-contrast {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  max-width: 880px;
+  margin: 10px auto 0;
+}
+
+.fey-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  min-height: 196px;
+  padding: 22px 22px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--lp-hairline);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.035), transparent 60%),
+    var(--lp-bg-2);
+  overflow: hidden;
+}
+
+/* Left card — the bet: flowing, alive, voice. */
+.fey-card--talk {
+  border-color: rgba(45, 212, 191, 0.22);
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.45),
+    0 0 40px rgba(45, 212, 191, 0.06) inset;
+}
+/* Right card — the friction: cold, blank, cursor. */
+.fey-card--type {
+  border-color: var(--lp-hairline);
+  opacity: 0.92;
+}
+
+.fey-card__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 16px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.fey-card--talk .fey-card__head { color: var(--lp-teal); }
+.fey-card--type .fey-card__head { color: var(--lp-faint); }
+
+.fey-card__pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.fey-card--talk .fey-card__pip {
+  background: var(--lp-teal);
+  box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.55);
+  animation: fey-pulse 2.4s ease-out infinite;
+}
+.fey-card--type .fey-card__pip {
+  background: var(--lp-faint);
+  box-shadow: none;
+}
+
+/* Flowing thought stream (left). */
+.fey-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.fey-stream__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.fey-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.fey-wave i {
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--lp-teal), var(--lp-blue));
+  animation: fey-wave 1.4s ease-in-out infinite;
+}
+.fey-wave i:nth-child(2) { animation-delay: 0.12s; }
+.fey-wave i:nth-child(3) { animation-delay: 0.24s; }
+.fey-wave i:nth-child(4) { animation-delay: 0.36s; }
+.fey-wave i:nth-child(5) { animation-delay: 0.48s; }
+.fey-stream__text {
+  font-size: 13.5px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: rgba(244, 245, 247, 0.86);
+}
+.fey-stream__text--faint { color: var(--lp-faint); }
+
+/* Blank page + blinking cursor (right). */
+.fey-blank {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px dashed var(--lp-hairline-strong);
+  background: rgba(255, 255, 255, 0.012);
+  padding: 18px 16px;
+}
+.fey-cursor-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--lp-faint);
+}
+.fey-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 18px;
+  background: var(--lp-muted);
+  animation: fey-blink 1.1s step-end infinite;
+}
+.fey-blank__hint {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--lp-faint);
+  font-style: italic;
+}
+
+/* Center arrow connecting the two states. */
+.fey-bridge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 22px;
+  align-self: center;
+}
+.fey-bridge__lbl {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lp-faint);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.fey-bridge__arc {
+  color: var(--lp-faint);
+  opacity: 0.6;
+}
+
+/* ─── Keyword chips ─────────────────────────────────────────────────────── */
+.fey-chips {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.fey-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--lp-hairline);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--lp-ink);
+}
+.fey-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.fey-chip--purple .fey-chip__dot { background: var(--lp-purple); box-shadow: 0 0 8px var(--lp-purple); }
+.fey-chip--teal   .fey-chip__dot { background: var(--lp-teal);   box-shadow: 0 0 8px var(--lp-teal); }
+.fey-chip--blue   .fey-chip__dot { background: var(--lp-blue);   box-shadow: 0 0 8px var(--lp-blue); }
+.fey-chip--pink   .fey-chip__dot { background: var(--lp-pink);   box-shadow: 0 0 8px var(--lp-pink); }
+.fey-chip--amber  .fey-chip__dot { background: var(--lp-amber);  box-shadow: 0 0 8px var(--lp-amber); }
+
+/* ─── Animations ────────────────────────────────────────────────────────── */
+@keyframes fey-wave {
+  0%, 100% { height: 6px; }
+  50% { height: 22px; }
+}
+@keyframes fey-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+@keyframes fey-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.5); }
+  70% { box-shadow: 0 0 0 9px rgba(45, 212, 191, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+}
+
+/* ─── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .fey-contrast {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    max-width: 440px;
+  }
+  .fey-bridge {
+    flex-direction: row;
+    padding: 4px 0;
+  }
+  .fey-bridge__lbl {
+    writing-mode: horizontal-tb;
+    transform: none;
+  }
+  .fey-bridge__arc { transform: rotate(90deg); }
+  .fey-card { min-height: 0; }
+}
+
+/* ─── Reduced motion ────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .fey-wave i,
+  .fey-cursor,
+  .fey-card--talk .fey-card__pip {
+    animation: none !important;
+  }
+  .fey-cursor { opacity: 1; }
+}
