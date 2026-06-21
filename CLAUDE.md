@@ -19,6 +19,42 @@ These three are living docs split out of the original product brief. When a deci
 changes, update the relevant doc (and the decision log in [prd.md](./prd.md)); keep
 this `CLAUDE.md` a thin index.
 
+# How the agent talks to the whiteboard (READ before touching the agent or board)
+
+**Intended design: the agent interacts with the whiteboard through LLM tool
+calls.** The board exposes a vocabulary of actions; the agent's job is to call
+the right one(s) per turn. This is the spec — treat divergence from it as a bug
+to fix, not a fact to preserve.
+
+**Current reality (as of the dual-channel commit `c19664f`): NOT yet
+tool-driven.** There is zero tool-calling in the codebase today:
+- `agent/bot.py` — the speaking LLM has **no tools**; it only talks.
+- `agent/board_writer.py` (caller channel) does a **plain chat completion** that
+  returns a Markdown string, then hardcodes a single `addMarkdown` POST. One
+  move only — it cannot make mind maps, flowcharts, images, etc.
+
+**The transport (don't change this part):** the agent POSTs
+`{action, payload}` to `http://localhost:8081/send` → `whiteboard/mock-server.js`
+broadcasts over `ws://localhost:8080` → `whiteboard/src/lib/commandQueue.ts`
+executes via `whiteboard/src/lib/boardApi.ts`. Converting to tool calls is
+**agent-side only**: give an LLM a tool schema for the actions below and route
+each `tool_call` to that same POST.
+
+**The tool surface** = the `switch (cmd.action)` cases in `commandQueue.ts`:
+`addMarkdown`, `addNote`, `addExplanation`, `appendToExplanation`, `addMindMap`,
+`addMindMapNode`, `addFlowchart`, `addFlowNode`, `connectNodes`, `updateNode`,
+`removeNode`, `requestImage`, `resolveImage`, `highlightNode`, `clearBoard`.
+(See that file for each one's exact payload — it is the source of truth.)
+
+**Before building the tool-calling feature, ASK the user — one question at a
+time, each with a recommended answer (this is how they want to work; they steer
+hard and dislike code written before the design forks are settled).** Open forks:
+which brain owns the tools (caller channel = recommended / speaking agent / a new
+dedicated board agent); native OpenAI `tools` vs pipecat function-calling;
+whether the board brain reads current board state vs keeps its own memory; one
+growing doc vs a new shape per topic. When in doubt about ANY design decision,
+surface it rather than silently defaulting.
+
 # Sentry (error monitoring + tracing + agent observability)
 
 This project uses the **`@sentry/nextjs`** SDK (v10) for error monitoring,
