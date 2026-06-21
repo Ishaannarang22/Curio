@@ -710,13 +710,35 @@ def _occupied_bboxes(summary: list[dict[str, Any]]) -> list[dict[str, float]]:
     ]
 
 
+def _real_dim(value: Any, fallback: float) -> float:
+    """Return *value* as a float if it's a real (nonzero) dimension, else *fallback*.
+
+    Existing blocks measure overlap by their REAL rendered w/h (written back via
+    update_geometry once tldraw reports post-layout geometry). A stored w/h of 0
+    or missing means "not yet measured", so we fall back to the coarse default so
+    we still reserve *some* space — never zero.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return v if v else fallback
+
+
 def _overlaps(bbox: dict[str, float], others: list[dict[str, float]]) -> bool:
-    """Return True if ``bbox`` overlaps any rect in ``others`` (with no gap check)."""
+    """Return True if ``bbox`` overlaps any rect in ``others`` (with no gap check).
+
+    ``others`` are EXISTING blocks: each is sized by its real stored w/h when
+    present (so a tall markdown doc / flowchart reserves its true height), falling
+    back to _BLOCK_W/_BLOCK_H only when that block hasn't reported geometry yet.
+    """
     x1, y1 = bbox["x"], bbox["y"]
     x2, y2 = x1 + bbox["w"], y1 + bbox["h"]
     for o in others:
-        ox2 = o["x"] + o.get("w", _BLOCK_W)
-        oy2 = o["y"] + o.get("h", _BLOCK_H)
+        ow = _real_dim(o.get("w"), _BLOCK_W)
+        oh = _real_dim(o.get("h"), _BLOCK_H)
+        ox2 = o["x"] + ow
+        oy2 = o["y"] + oh
         if x1 < ox2 and x2 > o["x"] and y1 < oy2 and y2 > o["y"]:
             return True
     return False

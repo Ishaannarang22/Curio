@@ -1,0 +1,166 @@
+/* Orb voice control — landing scrim + center→corner "park" transition.
+   Black & white only; all motion is CSS transitions on the stage box so the
+   single WebGL canvas just resizes via its ResizeObserver. */
+
+.orb-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  /* Semi-transparent dim + blur: you can still see (and, since this layer is
+     click-through, edit) the board behind the landing. */
+  background: radial-gradient(120% 120% at 50% 38%, rgba(12, 12, 16, 0.62) 0%,
+      rgba(2, 2, 4, 0.74) 100%);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  pointer-events: none; /* scrim is purely visual; only the orb takes clicks */
+  opacity: 1;
+  transition: opacity 0.7s ease;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+/* Once engaged, the landing dissolves for good (orb stays parked in corner). */
+.orb-backdrop[data-hidden='true'] {
+  opacity: 0;
+}
+
+/* Caption sits just below the orb (which is centered & fixed separately so it
+   can fly to the corner). Anchored to viewport center + half the orb box. */
+.orb-caption-wrap {
+  position: fixed;
+  top: calc(50% + 150px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.orb-caption {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  user-select: none;
+}
+
+.orb-caption[data-pulse='true'] {
+  animation: orb-caption-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes orb-caption-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Small status pill above the docked corner orb (connecting / error). */
+.orb-tooltip {
+  position: fixed;
+  right: 26px;
+  bottom: 150px;
+  z-index: 9999;
+  max-width: 240px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(10, 10, 12, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  word-break: break-word;
+  user-select: none;
+  animation: orb-tooltip-in 0.25s ease;
+}
+
+.orb-tooltip[data-tone='error'] {
+  color: rgba(255, 170, 170, 0.92);
+}
+
+@keyframes orb-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The orb stage: a fixed box that animates from screen-center (large) to the
+   bottom-right corner (small) once the session is engaged. */
+.orb-stage {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 300px;
+  height: 300px;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  cursor: pointer;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  transition: top 0.85s cubic-bezier(0.65, 0, 0.2, 1),
+    left 0.85s cubic-bezier(0.65, 0, 0.2, 1), width 0.85s cubic-bezier(0.65, 0, 0.2, 1),
+    height 0.85s cubic-bezier(0.65, 0, 0.2, 1), background 0.85s ease, border-color 0.85s ease,
+    box-shadow 0.4s ease;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.orb-stage:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+/* Docked: a small dark puck in the corner (raised above the tldraw watermark)
+   so the white wireframe reads against the light board behind it. Persists
+   whether the agent is live or stopped. */
+.orb-stage[data-docked='true'] {
+  top: calc(100% - 104px);
+  left: calc(100% - 68px);
+  width: 76px;
+  height: 76px;
+  background: radial-gradient(circle at 50% 42%, #0b0b0e 55%, #050506 100%);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.orb-stage[data-docked='true']:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+}
+
+/* Listening halo — only while the agent is actively connected. */
+.orb-stage[data-docked='true'][data-listening='true'] {
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 22px rgba(255, 255, 255, 0.16),
+    0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+/* Subtle lift on hover while centered, for affordance. */
+.orb-stage[data-docked='false']:hover {
+  transform: translate(-50%, -50%) scale(1.035);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-stage,
+  .orb-backdrop,
+  .orb-caption {
+    transition: none;
+  }
+  .orb-caption[data-pulse='true'],
+  .orb-tooltip {
+    animation: none;
+  }
+}

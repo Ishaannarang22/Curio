@@ -21,6 +21,9 @@ import { setEditor, connectBoardStream } from './lib/commandQueue'
 import { VoiceConnect } from './VoiceConnect'
 // M4 board-side Redis sync — best-effort, board still works if /api/board is down.
 import { setSession, fetchBoard, reportGeometry } from './lib/boardSync'
+// Client-side non-overlap guarantee. The agent proposes positions; the guard
+// guarantees no two blocks overlap, reacting to creation, growth, and drags.
+import { markUserMoved, noteChanged, isSuppressed, scheduleResolve } from './lib/layoutGuard'
 
 const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil, MarkdownDocUtil]
 
@@ -72,6 +75,7 @@ export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
     const unsub = editor.store.listen(
       (entry) => {
         const updates: { id: string; bbox: { x: number; y: number; w: number; h: number } }[] = []
+        const movedIds: string[] = []
         for (const [, change] of Object.entries(entry.changes.updated)) {
           // change is a [prev, next] tuple — we only need the next value.
           const next = (change as [unknown, unknown])[1] as { typeName?: string; id?: string; x?: number; y?: number; props?: { w?: number; h?: number } }
@@ -81,15 +85,68 @@ export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
           const w = typeof props?.w === 'number' ? props.w : 0
           const h = typeof props?.h === 'number' ? props.h : 0
           updates.push({ id, bbox: { x, y, w, h } })
+          movedIds.push(id)
         }
         if (updates.length > 0) reportGeometry(updates, sess)
+        // PIN user-moved shapes so the overlap guard never fights the user —
+        // their whole cluster stays put while neighbors yield around it.
+        if (movedIds.length > 0) markUserMoved(movedIds)
       },
       { source: 'user', scope: 'document' }, // only track user-initiated changes
     )
 
-    // Return value from useCallback is ignored by tldraw; store unsub for cleanup.
-    // We attach it to the editor instance as a non-reactive property.
-    ;(editor as Editor & { _boardSyncUnsub?: () => void })._boardSyncUnsub = unsub
+    // ── Overlap guard listener (ALL sources) ─────────────────────────────────
+    // Drives the client-side non-overlap guarantee. Reacts to AGENT and user
+    // changes alike: when blocks are born or their real bounds change (markdown
+    // growth, ELK/d3 settle, drag/resize), record the change, push real settled
+    // bboxes to Redis, and schedule an overlap-resolution pass.
+    const isBlock = (rec: { typeName?: string; type?: string } | undefined): boolean =>
+      rec?.typeName === 'shape' && rec.type !== 'arrow'
+
+    const unsubGuard = editor.store.listen(
+      (entry) => {
+        // Ignore the guard's OWN writes so it doesn't recurse.
+        if (isSuppressed()) return
+
+        const changedIds = new Set<string>()
+        const geometry: { id: string; bbox: { x: number; y: number; w: number; h: number } }[] = []
+
+        for (const rec of Object.values(entry.changes.added)) {
+          const r = rec as { typeName?: string; type?: string; id?: string; x?: number; y?: number; props?: { w?: number; h?: number } }
+          if (!isBlock(r) || typeof r.id !== 'string') continue
+          changedIds.add(r.id)
+          if (typeof r.x === 'number' && typeof r.y === 'number') {
+            geometry.push({ id: r.id, bbox: { x: r.x, y: r.y, w: r.props?.w ?? 0, h: r.props?.h ?? 0 } })
+          }
+        }
+        for (const change of Object.values(entry.changes.updated)) {
+          const next = (change as [unknown, unknown])[1] as { typeName?: string; type?: string; id?: string; x?: number; y?: number; props?: { w?: number; h?: number } }
+          if (!isBlock(next) || typeof next.id !== 'string') continue
+          changedIds.add(next.id)
+          if (typeof next.x === 'number' && typeof next.y === 'number') {
+            geometry.push({ id: next.id, bbox: { x: next.x, y: next.y, w: next.props?.w ?? 0, h: next.props?.h ?? 0 } })
+          }
+        }
+        // Removed shapes are relevant too — they free up space for the guard.
+        for (const rec of Object.values(entry.changes.removed)) {
+          const r = rec as { typeName?: string; type?: string; id?: string }
+          if (!isBlock(r) || typeof r.id !== 'string') continue
+          changedIds.add(r.id)
+        }
+
+        if (changedIds.size === 0) return
+
+        noteChanged([...changedIds])
+        if (geometry.length > 0) reportGeometry(geometry, sess)
+        scheduleResolve(editor)
+      },
+      { scope: 'document' }, // ALL sources — agent writes included
+    )
+
+    // Return value from useCallback is ignored by tldraw; store unsubs for cleanup.
+    // We attach them to the editor instance as non-reactive properties.
+    ;(editor as Editor & { _boardSyncUnsub?: () => void; _layoutGuardUnsub?: () => void })._boardSyncUnsub = unsub
+    ;(editor as Editor & { _boardSyncUnsub?: () => void; _layoutGuardUnsub?: () => void })._layoutGuardUnsub = unsubGuard
   }, [sess])
 
   return (
