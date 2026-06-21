@@ -47,22 +47,36 @@ function sleep(ms: number) {
 const elk = new ELK()
 
 // ─── addNote ──────────────────────────────────────────────────────────────────
+// Optional `internalId` registers the sticky in the idMap so it can be
+// addressed by update_node / move_block / remove_block. Backward-compat: callers
+// that omit internalId still work — the shape just won't be idMap-addressable.
 export function addNote(
   editor: Editor,
   text: string,
   position?: { x: number; y: number },
-  color?: string
+  color?: string,
+  internalId?: string
 ) {
-  const id = createShapeId()
+  const tlId = createShapeId()
   const pos = position ?? randomPosition(editor)
+  // Register in idMap if a semantic id was provided (add_sticky path).
+  if (internalId) {
+    const existing = getTLId(internalId)
+    if (existing && editor.getShape(existing)) {
+      // Upsert: update the existing note in place.
+      editor.updateShape({ id: existing, type: 'note', props: { text, color: color ?? 'yellow' } })
+      return
+    }
+    setTLId(internalId, tlId)
+  }
   editor.createShape({
-    id,
+    id: tlId,
     type: 'note',
     x: pos.x,
     y: pos.y,
     props: { text, color: color ?? 'yellow', size: 'm', font: 'sans' },
   })
-  scheduleAppearAnimation(editor, id)
+  scheduleAppearAnimation(editor, tlId)
 }
 
 function randomPosition(editor: Editor) {
@@ -640,6 +654,36 @@ async function runElkLayout(
   })
 
   await Promise.all(promises)
+}
+
+// ─── appendMarkdown ───────────────────────────────────────────────────────────
+// Appends new markdown below an existing markdown-doc shape (found via idMap).
+// If the id doesn't exist in the idMap, this is a no-op (safe to call speculatively).
+export function appendMarkdown(editor: Editor, internalId: string, markdown: string) {
+  const tlId = getTLId(internalId)
+  if (!tlId) return
+  const shape = editor.getShape(tlId)
+  if (!shape) return
+  const current = (shape.props as { markdown: string }).markdown ?? ''
+  editor.updateShape({
+    id: tlId,
+    type: 'markdown-doc',
+    props: { markdown: current + '\n\n' + markdown },
+  })
+}
+
+// ─── moveShape ────────────────────────────────────────────────────────────────
+// Animates an existing shape (any type) to absolute page coords (x, y).
+// Resolves the tldraw shape id via idMap; no-op if not found.
+export function moveShape(editor: Editor, internalId: string, x: number, y: number) {
+  const tlId = getTLId(internalId)
+  if (!tlId) return
+  const shape = editor.getShape(tlId)
+  if (!shape) return
+  editor.animateShape(
+    { id: tlId, type: shape.type, x, y },
+    { animation: { duration: 300 } }
+  )
 }
 
 // ─── Appear animation (CSS keyframe via data attribute) ───────────────────────

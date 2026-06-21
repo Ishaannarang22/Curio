@@ -104,13 +104,16 @@ def _make_tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_tool_schemas_count():
-    assert len(TOOL_SCHEMAS) == 7
+    assert len(TOOL_SCHEMAS) == 15
 
 
 def test_tool_schemas_names():
     expected = {
         "write_notes", "make_flowchart", "make_mindmap",
         "add_image", "highlight", "remove_block", "clear_board",
+        # 8 new tools
+        "append_notes", "write_explanation", "append_explanation",
+        "add_sticky", "add_node", "connect_nodes", "update_node", "move_block",
     }
     actual = {s["function"]["name"] for s in TOOL_SCHEMAS}
     assert actual == expected
@@ -699,3 +702,405 @@ async def test_arguments_as_json_string():
 
     assert result["ok"] is True
     assert bridge.sent[0]["payload"]["markdown"] == "Parsed from string."
+
+
+# ---------------------------------------------------------------------------
+# append_notes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_append_notes_sends_appendMarkdown():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    # Pre-populate a notes block so append has something to attach to.
+    await state.upsert_block({
+        "id": "notes_append",
+        "topicId": "t",
+        "type": "notes",
+        "title": "T",
+        "content": "existing",
+        "bbox": {"x": 100, "y": 100, "w": 480, "h": 320},
+        "shapeIds": ["notes_append"],
+        "updatedAt": time.time(),
+    })
+
+    tc = _make_tool_call("append_notes", {"id": "notes_append", "markdown": "## More\n\nAppended."})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    assert result["ok"] is True
+    assert result["action"] == "appendMarkdown"
+    pkt = bridge.last()
+    assert pkt["action"] == "appendMarkdown"
+    assert pkt["payload"]["id"] == "notes_append"
+    assert "Appended" in pkt["payload"]["markdown"]
+
+
+@pytest.mark.asyncio
+async def test_append_notes_updates_state_content():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    await state.upsert_block({
+        "id": "notes_grow",
+        "topicId": "t",
+        "type": "notes",
+        "title": "T",
+        "content": "part1",
+        "bbox": {"x": 0, "y": 0, "w": 480, "h": 320},
+        "shapeIds": ["notes_grow"],
+        "updatedAt": time.time(),
+    })
+
+    tc = _make_tool_call("append_notes", {"id": "notes_grow", "markdown": "part2"})
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    block = await state.get_block("notes_grow")
+    assert block is not None
+    assert "part1" in block["content"]
+    assert "part2" in block["content"]
+
+
+# ---------------------------------------------------------------------------
+# write_explanation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_write_explanation_sends_addExplanation():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("write_explanation", {"id": "exp_osmosis", "text": "Osmosis is water movement."})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    assert result["ok"] is True
+    assert result["action"] == "addExplanation"
+    pkt = bridge.last()
+    assert pkt["action"] == "addExplanation"
+    assert pkt["payload"]["id"] == "exp_osmosis"
+    assert pkt["payload"]["text"] == "Osmosis is water movement."
+
+
+@pytest.mark.asyncio
+async def test_write_explanation_upserts_state():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("write_explanation", {
+        "id": "exp_cell",
+        "text": "The cell is the basic unit.",
+        "w": 350,
+        "h": 200,
+    })
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    block = await state.get_block("exp_cell")
+    assert block is not None
+    assert block["type"] == "explanation"
+    assert block["shapeIds"] == ["exp_cell"]
+    # w/h from args should appear in bbox
+    assert block["bbox"]["w"] == 350
+    assert block["bbox"]["h"] == 200
+
+
+# ---------------------------------------------------------------------------
+# append_explanation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_append_explanation_sends_appendToExplanation():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("append_explanation", {"id": "exp_dna", "moreText": "...and it carries genes."})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    assert result["ok"] is True
+    assert result["action"] == "appendToExplanation"
+    pkt = bridge.last()
+    assert pkt["action"] == "appendToExplanation"
+    assert pkt["payload"]["id"] == "exp_dna"
+    assert pkt["payload"]["moreText"] == "...and it carries genes."
+
+
+# ---------------------------------------------------------------------------
+# add_sticky
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_sticky_sends_addNote():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_sticky", {"id": "sticky_atp", "text": "ATP = energy currency", "color": "green"})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    assert result["ok"] is True
+    assert result["action"] == "addNote"
+    pkt = bridge.last()
+    assert pkt["action"] == "addNote"
+    assert pkt["payload"]["id"] == "sticky_atp"
+    assert pkt["payload"]["text"] == "ATP = energy currency"
+    assert pkt["payload"]["color"] == "green"
+
+
+@pytest.mark.asyncio
+async def test_add_sticky_upserts_state():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_sticky", {"id": "sticky_note1", "text": "Remember this!"})
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    block = await state.get_block("sticky_note1")
+    assert block is not None
+    assert block["type"] == "note"
+    assert block["shapeIds"] == ["sticky_note1"]
+
+
+# ---------------------------------------------------------------------------
+# add_node (both kinds)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_node_mindmap_sends_addMindMapNode():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_node", {
+        "id": "mm_center",
+        "label": "Cell Biology",
+        "kind": "mindMap",
+    })
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    assert result["ok"] is True
+    assert result["action"] == "addMindMapNode"
+    pkt = bridge.last()
+    assert pkt["action"] == "addMindMapNode"
+    assert pkt["payload"]["id"] == "mm_center"
+    assert pkt["payload"]["label"] == "Cell Biology"
+    assert "parentId" not in pkt["payload"]  # no parentId means home/center node
+
+
+@pytest.mark.asyncio
+async def test_add_node_mindmap_with_parent():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_node", {
+        "id": "mm_branch1",
+        "label": "Mitosis",
+        "kind": "mindMap",
+        "parentId": "mm_center",
+    })
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    assert result["ok"] is True
+    pkt = bridge.last()
+    assert pkt["payload"]["parentId"] == "mm_center"
+
+
+@pytest.mark.asyncio
+async def test_add_node_flow_sends_addFlowNode():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_node", {
+        "id": "flow_step1",
+        "label": "Glycolysis",
+        "kind": "flow",
+        "subtitle": "Breaks glucose",
+    })
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="bio")
+
+    assert result["ok"] is True
+    assert result["action"] == "addFlowNode"
+    pkt = bridge.last()
+    assert pkt["action"] == "addFlowNode"
+    assert pkt["payload"]["id"] == "flow_step1"
+    assert pkt["payload"]["subtitle"] == "Breaks glucose"
+
+
+@pytest.mark.asyncio
+async def test_add_node_explicit_xy_used_directly():
+    """Explicit x/y must be forwarded as-is into position, skipping resolve_placement."""
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_node", {
+        "id": "node_placed",
+        "label": "Placed",
+        "kind": "flow",
+        "x": 999,
+        "y": 777,
+    })
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    pos = bridge.last()["payload"]["position"]
+    assert pos["x"] == 999.0
+    assert pos["y"] == 777.0
+
+
+@pytest.mark.asyncio
+async def test_add_node_upserts_state():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("add_node", {
+        "id": "node_state",
+        "label": "Test",
+        "kind": "mindMap",
+    })
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    block = await state.get_block("node_state")
+    assert block is not None
+    assert block["shapeIds"] == ["node_state"]
+    assert block["type"] == "mindMap"
+
+
+# ---------------------------------------------------------------------------
+# connect_nodes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_connect_nodes_sends_connectNodes():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("connect_nodes", {"fromId": "node_a", "toId": "node_b", "label": "causes"})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    assert result["ok"] is True
+    assert result["action"] == "connectNodes"
+    pkt = bridge.last()
+    assert pkt["action"] == "connectNodes"
+    assert pkt["payload"]["fromId"] == "node_a"
+    assert pkt["payload"]["toId"] == "node_b"
+    assert pkt["payload"]["label"] == "causes"
+
+
+@pytest.mark.asyncio
+async def test_connect_nodes_without_label():
+    """label is optional; payload must not include it when absent."""
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("connect_nodes", {"fromId": "n1", "toId": "n2"})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    assert result["ok"] is True
+    pkt = bridge.last()
+    assert "label" not in pkt["payload"]
+
+
+@pytest.mark.asyncio
+async def test_connect_nodes_does_not_write_state():
+    """connect_nodes creates an edge; no block record should appear in state."""
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("connect_nodes", {"fromId": "x", "toId": "y"})
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    assert state._blocks == {}
+
+
+# ---------------------------------------------------------------------------
+# update_node
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_node_sends_updateNode():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("update_node", {"id": "node_x", "newLabel": "Revised Label"})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    assert result["ok"] is True
+    assert result["action"] == "updateNode"
+    pkt = bridge.last()
+    assert pkt["action"] == "updateNode"
+    assert pkt["payload"]["id"] == "node_x"
+    assert pkt["payload"]["newLabel"] == "Revised Label"
+
+
+@pytest.mark.asyncio
+async def test_update_node_updates_state_title():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    await state.upsert_block({
+        "id": "node_upd",
+        "topicId": "t",
+        "type": "flow",
+        "title": "Old",
+        "content": "Old",
+        "bbox": {"x": 0, "y": 0, "w": 180, "h": 60},
+        "shapeIds": ["node_upd"],
+        "updatedAt": time.time(),
+    })
+
+    tc = _make_tool_call("update_node", {"id": "node_upd", "newLabel": "New"})
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    block = await state.get_block("node_upd")
+    assert block["title"] == "New"
+
+
+# ---------------------------------------------------------------------------
+# move_block
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_move_block_sends_moveShape():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    tc = _make_tool_call("move_block", {"id": "blk_move", "x": 500, "y": 300})
+    result = await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    assert result["ok"] is True
+    assert result["action"] == "moveShape"
+    pkt = bridge.last()
+    assert pkt["action"] == "moveShape"
+    assert pkt["payload"]["id"] == "blk_move"
+    assert pkt["payload"]["x"] == 500.0
+    assert pkt["payload"]["y"] == 300.0
+
+
+@pytest.mark.asyncio
+async def test_move_block_updates_bbox_in_state():
+    bridge = FakeBridge()
+    state = FakeState()
+
+    await state.upsert_block({
+        "id": "blk_mv",
+        "topicId": "t",
+        "type": "notes",
+        "title": "T",
+        "content": "",
+        "bbox": {"x": 100, "y": 100, "w": 480, "h": 320},
+        "shapeIds": ["blk_mv"],
+        "updatedAt": time.time(),
+    })
+
+    tc = _make_tool_call("move_block", {"id": "blk_mv", "x": 800, "y": 600})
+    await execute_tool_call(tc, state=state, bridge=bridge, active_topic="t")
+
+    block = await state.get_block("blk_mv")
+    assert block["bbox"]["x"] == 800.0
+    assert block["bbox"]["y"] == 600.0
+    # Width/height should be preserved.
+    assert block["bbox"]["w"] == 480
+    assert block["bbox"]["h"] == 320

@@ -5,14 +5,22 @@ This is M2 of the harness pipeline. It is deliberately decoupled from M1
 (any object exposing the M1 async methods), never a direct import. This lets M1
 and M2 be built and tested independently.
 
-Tool → board action mapping:
-  write_notes    → addMarkdown          (single shape, id = block id)
-  make_flowchart → addFlowchart         (multi-shape: one per step + arrows; child ids = step ids)
-  make_mindmap   → addMindMap           (multi-shape: center + branches; child ids = center + branch ids)
-  add_image      → requestImage         (stub: shimmer placeholder; no resolveImage in v1)
-  highlight      → highlightNode        (no state write needed)
-  remove_block   → removeNode × N       (one removeNode per child shape id, then state.remove_block)
-  clear_board    → clearBoard           (no state write; caller should state.clear() separately)
+Tool → board action mapping (15-tool contract):
+  write_notes      → addMarkdown          (single shape, id = block id)
+  append_notes     → appendMarkdown       (append to existing markdown-doc shape)
+  write_explanation→ addExplanation       (typewriter card)
+  append_explanation→appendToExplanation  (append to existing explanation card)
+  add_sticky       → addNote              (sticky note, addressable by id)
+  make_flowchart   → addFlowchart         (multi-shape: one per step + arrows; child ids = step ids)
+  make_mindmap     → addMindMap           (multi-shape: center + branches; child ids = center + branch ids)
+  add_node         → addMindMapNode / addFlowNode  (kind-dispatch)
+  connect_nodes    → connectNodes         (bound arrow between two existing nodes)
+  update_node      → updateNode           (relabel any node)
+  move_block       → moveShape            (animated reposition)
+  add_image        → requestImage         (stub: shimmer placeholder; no resolveImage in v1)
+  highlight        → highlightNode        (no state write needed)
+  remove_block     → removeNode × N       (one removeNode per child shape id, then state.remove_block)
+  clear_board      → clearBoard           (no state write; caller should state.clear() separately)
 """
 
 from __future__ import annotations
@@ -365,6 +373,283 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    # ------------------------------------------------------------------
+    # append_notes → appendMarkdown  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "append_notes",
+            "description": (
+                "Append a section to an existing notes block without resending its whole body. "
+                "Use to grow a topic's notes as the speaker keeps talking. "
+                "id must reference a write_notes block."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Id of an existing write_notes block.",
+                    },
+                    "markdown": {
+                        "type": "string",
+                        "description": "Markdown to append below existing content.",
+                    },
+                },
+                "required": ["id", "markdown"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # write_explanation → addExplanation  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "write_explanation",
+            "description": (
+                "Create or update an explanation card that reveals its text with a typewriter animation. "
+                "Good for a focused, spoken-aloud definition or aside. "
+                "Reuse an existing id to replace its text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Stable semantic id, e.g. 'explain_osmosis'.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Full text to reveal.",
+                    },
+                    "anchor": _ANCHOR_SCHEMA,
+                    "w": {
+                        "type": "number",
+                        "description": "Optional width (default 300).",
+                    },
+                    "h": {
+                        "type": "number",
+                        "description": "Optional height (default 180).",
+                    },
+                },
+                "required": ["id", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # append_explanation → appendToExplanation  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "append_explanation",
+            "description": (
+                "Append more text to an existing explanation card; "
+                "the new text animates in below the current text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Id of an existing write_explanation card.",
+                    },
+                    "moreText": {
+                        "type": "string",
+                        "description": "Text to append and animate in.",
+                    },
+                },
+                "required": ["id", "moreText"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # add_sticky → addNote  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "add_sticky",
+            "description": "Place a short sticky note for a quick callout, reminder, or label.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Stable semantic id, e.g. 'note_remember_atp'.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Short note text.",
+                    },
+                    "color": {
+                        "type": "string",
+                        "description": "Optional tldraw note color (default 'yellow').",
+                    },
+                    "anchor": _ANCHOR_SCHEMA,
+                },
+                "required": ["id", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # add_node → addMindMapNode / addFlowNode  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "add_node",
+            "description": (
+                "Create or update a SINGLE graph node and place it precisely. "
+                "kind 'mindMap' => a mind-map node (omit parentId for the center/home node; "
+                "set parentId to auto-draw an edge from the parent). "
+                "kind 'flow' => a flowchart box. "
+                "Pass x/y (absolute page coords) for exact placement, or omit to let the harness place it. "
+                "Reuse an id to relabel/resize in place."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Stable semantic id, e.g. 'map_home' or 'flow_step1'.",
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Node label.",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["mindMap", "flow"],
+                        "description": "Which node shape to create.",
+                    },
+                    "x": {
+                        "type": "number",
+                        "description": "Optional absolute page x (top-left). Omit to auto-place.",
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "Optional absolute page y (top-left). Omit to auto-place.",
+                    },
+                    "parentId": {
+                        "type": "string",
+                        "description": "Optional; if set, draws an edge from this parent to the new node (mind-map use).",
+                    },
+                    "subtitle": {
+                        "type": "string",
+                        "description": "Optional secondary line (flow nodes).",
+                    },
+                    "w": {
+                        "type": "number",
+                        "description": "Optional width (defaults: mindMap 140, flow 180).",
+                    },
+                    "h": {
+                        "type": "number",
+                        "description": "Optional height (defaults: mindMap 44, flow 60/80).",
+                    },
+                },
+                "required": ["id", "label", "kind"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # connect_nodes → connectNodes  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_nodes",
+            "description": (
+                "Draw a bound arrow between two existing nodes "
+                "(from add_node, make_flowchart, or make_mindmap). "
+                "The arrow re-binds as nodes move."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fromId": {
+                        "type": "string",
+                        "description": "Source node id.",
+                    },
+                    "toId": {
+                        "type": "string",
+                        "description": "Target node id.",
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Optional edge label.",
+                    },
+                },
+                "required": ["fromId", "toId"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # update_node → updateNode  (new — listed as "base" but missing from original 7)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "update_node",
+            "description": "Relabel an existing node in place by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Id of an existing node.",
+                    },
+                    "newLabel": {
+                        "type": "string",
+                        "description": "New label text.",
+                    },
+                },
+                "required": ["id", "newLabel"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # move_block → moveShape  (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "move_block",
+            "description": (
+                "Reposition any existing block (node, notes, image, sticky, explanation) "
+                "to absolute page coordinates, animated. "
+                "Use to re-arrange the board or open space for a new block."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Id of an existing block.",
+                    },
+                    "x": {
+                        "type": "number",
+                        "description": "Absolute page x (top-left).",
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "Absolute page y (top-left).",
+                    },
+                },
+                "required": ["id", "x", "y"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -557,10 +842,26 @@ async def _dispatch(
 
     if tool_name == "write_notes":
         return await _write_notes(args, state=state, bridge=bridge, active_topic=active_topic)
+    elif tool_name == "append_notes":
+        return await _append_notes(args, state=state, bridge=bridge, active_topic=active_topic)
+    elif tool_name == "write_explanation":
+        return await _write_explanation(args, state=state, bridge=bridge, active_topic=active_topic)
+    elif tool_name == "append_explanation":
+        return await _append_explanation(args, bridge=bridge)
+    elif tool_name == "add_sticky":
+        return await _add_sticky(args, state=state, bridge=bridge, active_topic=active_topic)
     elif tool_name == "make_flowchart":
         return await _make_flowchart(args, state=state, bridge=bridge, active_topic=active_topic)
     elif tool_name == "make_mindmap":
         return await _make_mindmap(args, state=state, bridge=bridge, active_topic=active_topic)
+    elif tool_name == "add_node":
+        return await _add_node(args, state=state, bridge=bridge, active_topic=active_topic)
+    elif tool_name == "connect_nodes":
+        return await _connect_nodes(args, bridge=bridge)
+    elif tool_name == "update_node":
+        return await _update_node(args, state=state, bridge=bridge)
+    elif tool_name == "move_block":
+        return await _move_block(args, state=state, bridge=bridge)
     elif tool_name == "add_image":
         return await _add_image(args, state=state, bridge=bridge, active_topic=active_topic)
     elif tool_name == "highlight":
@@ -802,3 +1103,253 @@ async def _clear_board(
     if clear is not None:
         await clear()
     return {"action": "clearBoard"}
+
+
+# ---------------------------------------------------------------------------
+# New tool handlers (8 additions for the full 15-tool contract)
+# ---------------------------------------------------------------------------
+
+
+async def _append_notes(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+    active_topic: str,
+) -> dict[str, Any]:
+    """append_notes → appendMarkdown.  No topicId in contract; default to active_topic."""
+    block_id: str = _valid_id(args["id"])
+    markdown: str = _clamp_str(args.get("markdown", ""), _MAX_CONTENT_BYTES, "markdown")
+
+    await bridge.send("appendMarkdown", {"id": block_id, "markdown": markdown})
+
+    # Best-effort: update content field in state if block exists.
+    existing = await state.get_block(block_id)
+    if existing:
+        old_content = existing.get("content", "")
+        await state.upsert_block({
+            **existing,
+            "content": old_content + "\n\n" + markdown,
+            "updatedAt": time.time(),
+        })
+
+    return {"action": "appendMarkdown", "id": block_id}
+
+
+async def _write_explanation(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+    active_topic: str,
+) -> dict[str, Any]:
+    """write_explanation → addExplanation.  w/h are optional passthrough fields."""
+    block_id: str = _valid_id(args["id"])
+    text: str = _clamp_str(args.get("text", ""), _MAX_CONTENT_BYTES, "text")
+    anchor: dict[str, Any] | None = args.get("anchor")
+    # w/h optional — pass through if provided so boardApi can use them
+    w: float | None = args.get("w")
+    h: float | None = args.get("h")
+
+    pos = await resolve_placement(state, block_id, anchor)
+
+    payload: dict[str, Any] = {"id": block_id, "text": text, "position": pos}
+    if w is not None:
+        payload["w"] = w
+    if h is not None:
+        payload["h"] = h
+
+    await bridge.send("addExplanation", payload)
+
+    block_w = w if w is not None else 300
+    block_h = h if h is not None else 180
+    await state.upsert_block({
+        "id": block_id,
+        "topicId": active_topic,
+        "type": "explanation",
+        "title": text[:80],
+        "content": text,
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": block_w, "h": block_h},
+        "shapeIds": [block_id],
+        "updatedAt": time.time(),
+    })
+
+    return {"action": "addExplanation", "id": block_id}
+
+
+async def _append_explanation(
+    args: dict[str, Any],
+    *,
+    bridge: BridgePoster,
+) -> dict[str, Any]:
+    """append_explanation → appendToExplanation.  No state write (best-effort only)."""
+    block_id: str = _valid_id(args["id"])
+    more_text: str = _clamp_str(args.get("moreText", ""), _MAX_CONTENT_BYTES, "moreText")
+
+    await bridge.send("appendToExplanation", {"id": block_id, "moreText": more_text})
+
+    return {"action": "appendToExplanation", "id": block_id}
+
+
+async def _add_sticky(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+    active_topic: str,
+) -> dict[str, Any]:
+    """add_sticky → addNote.  Passes id so the board can register it in the idMap."""
+    block_id: str = _valid_id(args["id"])
+    text: str = _clamp_str(args.get("text", ""), _MAX_CONTENT_BYTES, "text")
+    color: str | None = args.get("color")
+    anchor: dict[str, Any] | None = args.get("anchor")
+
+    pos = await resolve_placement(state, block_id, anchor)
+
+    payload: dict[str, Any] = {"id": block_id, "text": text, "position": pos}
+    if color is not None:
+        payload["color"] = color
+
+    await bridge.send("addNote", payload)
+
+    await state.upsert_block({
+        "id": block_id,
+        "topicId": active_topic,
+        "type": "note",
+        "title": text[:80],
+        "content": text,
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": 200, "h": 200},
+        "shapeIds": [block_id],
+        "updatedAt": time.time(),
+    })
+
+    return {"action": "addNote", "id": block_id}
+
+
+async def _add_node(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+    active_topic: str,
+) -> dict[str, Any]:
+    """add_node → addMindMapNode (kind='mindMap') or addFlowNode (kind='flow').
+
+    Explicit x/y → position:{x,y} (low-level coord path).
+    Omitted x/y → resolve_placement (harness-placement path).
+    """
+    block_id: str = _valid_id(args["id"])
+    label: str = _clamp_str(args.get("label", ""), _MAX_LABEL_CHARS, "label")
+    kind: str = args.get("kind", "")
+    if kind not in ("mindMap", "flow"):
+        raise ValueError(f"add_node: invalid kind {kind!r}; must be 'mindMap' or 'flow'")
+
+    # Explicit coords take priority; fall back to harness placement.
+    raw_x: float | None = args.get("x")
+    raw_y: float | None = args.get("y")
+    if raw_x is not None and raw_y is not None:
+        pos: dict[str, float] = {"x": float(raw_x), "y": float(raw_y)}
+    else:
+        pos = await resolve_placement(state, block_id, None)
+
+    if kind == "mindMap":
+        parent_id: str | None = args.get("parentId")
+        payload: dict[str, Any] = {"id": block_id, "label": label, "position": pos}
+        if parent_id is not None:
+            payload["parentId"] = _valid_id(parent_id, "parentId")
+        await bridge.send("addMindMapNode", payload)
+        action = "addMindMapNode"
+    else:  # kind == "flow"
+        subtitle: str | None = args.get("subtitle")
+        payload = {"id": block_id, "label": label, "position": pos}
+        if subtitle is not None:
+            payload["subtitle"] = _clamp_str(subtitle, _MAX_LABEL_CHARS, "subtitle")
+        await bridge.send("addFlowNode", payload)
+        action = "addFlowNode"
+
+    await state.upsert_block({
+        "id": block_id,
+        "topicId": active_topic,
+        "type": kind,
+        "title": label,
+        "content": label,
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": _BLOCK_W, "h": _BLOCK_H},
+        "shapeIds": [block_id],
+        "updatedAt": time.time(),
+    })
+
+    return {"action": action, "id": block_id}
+
+
+async def _connect_nodes(
+    args: dict[str, Any],
+    *,
+    bridge: BridgePoster,
+) -> dict[str, Any]:
+    """connect_nodes → connectNodes.  Edge only; no block record in state."""
+    from_id: str = _valid_id(args["fromId"], "fromId")
+    to_id: str = _valid_id(args["toId"], "toId")
+    label_raw: str | None = args.get("label")
+    label: str | None = _clamp_str(label_raw, _MAX_LABEL_CHARS, "label") if label_raw else None
+
+    payload: dict[str, Any] = {"fromId": from_id, "toId": to_id}
+    if label is not None:
+        payload["label"] = label
+
+    await bridge.send("connectNodes", payload)
+
+    return {"action": "connectNodes", "fromId": from_id, "toId": to_id}
+
+
+async def _update_node(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+) -> dict[str, Any]:
+    """update_node → updateNode.  Best-effort title update in state."""
+    block_id: str = _valid_id(args["id"])
+    new_label: str = _clamp_str(args.get("newLabel", ""), _MAX_LABEL_CHARS, "newLabel")
+
+    await bridge.send("updateNode", {"id": block_id, "newLabel": new_label})
+
+    # Update stored title if block exists.
+    existing = await state.get_block(block_id)
+    if existing:
+        await state.upsert_block({
+            **existing,
+            "title": new_label,
+            "updatedAt": time.time(),
+        })
+
+    return {"action": "updateNode", "id": block_id}
+
+
+async def _move_block(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+) -> dict[str, Any]:
+    """move_block → moveShape.  Updates bbox in state."""
+    block_id: str = _valid_id(args["id"])
+    x: float = float(args["x"])
+    y: float = float(args["y"])
+
+    await bridge.send("moveShape", {"id": block_id, "x": x, "y": y})
+
+    # Update stored bbox position if block exists.
+    existing = await state.get_block(block_id)
+    if existing:
+        old_bbox = existing.get("bbox") or {}
+        await state.upsert_block({
+            **existing,
+            "bbox": {
+                **old_bbox,
+                "x": x,
+                "y": y,
+            },
+            "updatedAt": time.time(),
+        })
+
+    return {"action": "moveShape", "id": block_id, "x": x, "y": y}

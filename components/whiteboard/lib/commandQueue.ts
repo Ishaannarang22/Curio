@@ -16,6 +16,7 @@ const ALLOWED_ACTIONS = new Set([
   'addExplanation',
   'appendToExplanation',
   'addMarkdown',
+  'appendMarkdown',
   'addFlowNode',
   'addMindMapNode',
   'connectNodes',
@@ -26,6 +27,7 @@ const ALLOWED_ACTIONS = new Set([
   'requestImage',
   'resolveImage',
   'highlightNode',
+  'moveShape',
   'clearBoard',
 ])
 
@@ -82,7 +84,12 @@ function isValidCommand(cmd: unknown): cmd is Command {
 
   switch (cmd.action) {
     case 'addNote':
-      return isString(p.text) && isPosition(p.position)
+      // id is optional (add_sticky supplies it; legacy callers omit it)
+      return isString(p.text) && isPosition(p.position) && (p.id === undefined || isId(p.id))
+    case 'appendMarkdown':
+      return isId(p.id) && isString(p.markdown)
+    case 'moveShape':
+      return isId(p.id) && Number.isFinite(p.x) && Number.isFinite(p.y)
     case 'addExplanation':
       return isId(p.id) && isString(p.text) && isPosition(p.position)
     case 'appendToExplanation':
@@ -132,8 +139,19 @@ async function execute(cmd: Command) {
   try {
     switch (cmd.action) {
       case 'addNote':
-        api.addNote(editor, p.text as string, p.position as { x: number; y: number } | undefined, p.color as string | undefined)
+        // Thread optional id through so add_sticky blocks are idMap-addressable.
+        api.addNote(editor, p.text as string, p.position as { x: number; y: number } | undefined, p.color as string | undefined, p.id as string | undefined)
         await sleep(250)
+        break
+
+      case 'appendMarkdown':
+        api.appendMarkdown(editor, p.id as string, p.markdown as string)
+        await sleep(150)
+        break
+
+      case 'moveShape':
+        api.moveShape(editor, p.id as string, p.x as number, p.y as number)
+        await sleep(350) // slightly longer than the 300ms animation
         break
 
       case 'addExplanation':
