@@ -1,0 +1,237 @@
+/* Notion-style fonts are loaded via @fontsource imports in main.tsx
+   (Inter for text, JetBrains Mono for code). */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Shape appear animation — fade + slight scale-in.
+   IMPORTANT: this must NOT be applied to `.tl-shape`. tldraw positions every
+   shape with `transform: translate(x,y)` on `.tl-shape`; animating `transform`
+   there (even just scale) clobbers the translate and snaps the shape to the
+   page origin. We apply it to `.tl-html-container`, a child element that
+   carries no positioning transform, so scaling is safe. */
+@keyframes shape-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Shimmer animation for ImageNode loading state */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Apply appear animation to the custom-shape content containers only. */
+.tl-html-container {
+  animation: shape-appear 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ─── Markdown doc (markdown-doc shape) — Notion-style WYSIWYG ───────────────
+   One auto-growing shape hosting a Tiptap editor. No card chrome: it reads as a
+   plain document; tldraw draws the selection outline. A subtle ring appears
+   while editing so it's clear the doc is live. */
+.curio-doc {
+  width: 100%;
+  height: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border-radius: 8px;
+}
+.curio-doc.is-highlighted {
+  background: rgba(99, 102, 241, 0.08);
+}
+.curio-doc.is-editing {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 0 0 1.5px #6366f1, 0 6px 24px rgba(15, 23, 42, 0.12);
+}
+
+/* ProseMirror surface */
+.curio-prose {
+  outline: none;
+  color: #1f2329;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  word-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+.curio-prose > :first-child { margin-top: 0; }
+.curio-prose > :last-child { margin-bottom: 0; }
+
+.curio-prose h1, .curio-prose h2, .curio-prose h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  color: #16181d;
+  margin: 1.2em 0 0.4em;
+}
+.curio-prose h1 { font-size: 1.75em; }
+.curio-prose h2 { font-size: 1.4em; }
+.curio-prose h3 { font-size: 1.15em; }
+.curio-prose p { margin: 0.45em 0; }
+.curio-prose a.curio-link { color: #4f46e5; text-decoration: underline; cursor: pointer; }
+.curio-prose strong { font-weight: 600; }
+.curio-prose em { font-style: italic; }
+.curio-prose ul, .curio-prose ol { margin: 0.45em 0; padding-left: 1.5em; }
+.curio-prose li { margin: 0.15em 0; }
+.curio-prose li p { margin: 0; }
+
+/* Task list (checkboxes) */
+.curio-prose ul[data-type='taskList'] { list-style: none; padding-left: 0.2em; }
+.curio-prose ul[data-type='taskList'] li { display: flex; align-items: flex-start; gap: 0.5em; }
+.curio-prose ul[data-type='taskList'] li > label { margin-top: 0.25em; user-select: none; }
+.curio-prose ul[data-type='taskList'] li > div { flex: 1; }
+
+.curio-prose blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid #d1d5db;
+  color: #4b5563;
+}
+.curio-prose code.curio-inline-code {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: #f1f1f4;
+  color: #c2185b;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.curio-prose pre.curio-codeblock {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  margin: 0.7em 0;
+  padding: 0.8em 1em;
+  background: #1e1e2e;
+  color: #e4e4ef;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.curio-prose pre.curio-codeblock code { background: none; color: inherit; padding: 0; }
+.curio-prose hr.curio-hr { border: none; border-top: 1.5px solid #e5e7eb; margin: 1em 0; }
+
+/* Tables */
+.curio-prose table {
+  border-collapse: collapse;
+  margin: 0.7em 0;
+  width: 100%;
+  font-size: 0.95em;
+  table-layout: fixed;
+}
+.curio-prose th, .curio-prose td {
+  border: 1px solid #e0e0e6;
+  padding: 0.4em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+.curio-prose th { background: #f7f7f9; font-weight: 600; }
+.curio-prose .selectedCell { background: rgba(99, 102, 241, 0.12); }
+
+/* Placeholder text (empty paragraph / heading) */
+.curio-prose p.is-editor-empty:first-child::before,
+.curio-prose .is-empty::before {
+  content: attr(data-placeholder);
+  color: #b4b8c0;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ─── Slash command popup ──────────────────────────────────────────────────── */
+.curio-slash-menu {
+  width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.16);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.curio-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.curio-slash-item.is-active { background: #f1f1f6; }
+.curio-slash-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+.curio-slash-text { display: flex; flex-direction: column; min-width: 0; }
+.curio-slash-title { font-size: 14px; font-weight: 500; color: #16181d; }
+.curio-slash-desc { font-size: 12px; color: #8b8f99; }
+
+/* ─── Bubble (selection) menu ──────────────────────────────────────────────── */
+.curio-bubble {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: #16181d;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+.curio-bubble button {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #d1d5db;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.curio-bubble button:hover { background: rgba(255, 255, 255, 0.12); }
+.curio-bubble button.is-active { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+/* Override tldraw toolbar styles to feel minimal */
+.tlui-toolbar {
+  background: rgba(15, 23, 42, 0.88) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+/* Keep tldraw UI buttons readable */
+.tlui-button {
+  color: #cbd5e1 !important;
+}
+
+.tlui-button:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
