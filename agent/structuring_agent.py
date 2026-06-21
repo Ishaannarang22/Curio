@@ -118,6 +118,37 @@ whiteboard, using the provided tool. Rules:
 Emit exactly one {tool} call.
 """
 
+_SUMMARY_SYSTEM = """\
+You condense a student's raw spoken transcript of ONE topic into a SHORT sticky-note
+summary for a study whiteboard. Rules:
+- Be FAITHFUL: only what the student actually said. NEVER invent facts.
+- Keep it TIGHT enough to fit a sticky note: a one-line gist, or up to 3 very short
+  bullet points (use "- " bullets). No headings, no preamble.
+- Drop filler, repetition, false starts, and tangents — keep the substance.
+Answer ONLY via the summarize_topic tool.
+"""
+
+_SUMMARY_TOOL: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_topic",
+            "description": "Condense the topic's raw transcript into a short sticky-note summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "The short summary: a one-line gist or up to 3 brief '- ' bullets.",
+                    },
+                },
+                "required": ["summary"],
+                "additionalProperties": False,
+            },
+        },
+    }
+]
+
 _ROUTER_TOOL: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -250,9 +281,10 @@ class StructuringAgent:
 
             if not verdict.get("needs_restructure") or not verdict.get("format"):
                 logger.info(
-                    f"structuring: leave raw for {event.label!r} ({event.node_id}) "
-                    f"— {verdict.get('reason', 'no restructure')}"
+                    f"structuring: no diagram for {event.label!r} ({event.node_id}) "
+                    f"— {verdict.get('reason', 'no restructure')}; shrinking to sticky"
                 )
+                await self._shrink_to_sticky(event)
                 return
 
             fmt = verdict["format"]
@@ -347,6 +379,54 @@ class StructuringAgent:
                 )
 
         logger.info(f"structuring: rendered {fmt} for {event.label!r} ({event.node_id})")
+
+    async def _shrink_to_sticky(self, event: SealEvent) -> None:
+        """No diagram needed → condense the raw into a sticky-note summary, replacing the
+        verbose live-transcript markdown block in place. Keeps the content, shrunk."""
+        summary = await self._summarize(event)
+        if not summary:
+            # Couldn't summarize — leave the raw markdown rather than blank the topic.
+            logger.info(f"structuring: keep raw for {event.label!r} ({event.node_id}) — empty summary")
+            return
+
+        # Remove the verbose markdown shape FIRST. Its idMap entry is still intact (the
+        # sticky below re-registers node_id); the state block stays so the sticky reuses
+        # the same position (resolve_placement rule 1 = "reuse existing bbox").
+        await self._bridge.send("removeNode", {"id": event.node_id})
+
+        result = await execute_tool_call(
+            {"type": "function", "function": {"name": "add_sticky", "arguments": {
+                "id": event.node_id, "text": summary, "color": "yellow"}}},
+            state=self._state, bridge=self._bridge, active_topic=event.node_id,
+        )
+        if not result.get("ok"):
+            logger.warning(f"structuring: sticky failed for {event.node_id!r}: {result.get('error')}")
+            return
+
+        # Parent MERGE: a shrunk parent still consolidates — clear provisional children.
+        if event.kind == "parent":
+            for desc_id in event.descendant_ids:
+                await execute_tool_call(
+                    {"type": "function", "function": {"name": "remove_block", "arguments": {"id": desc_id}}},
+                    state=self._state, bridge=self._bridge, active_topic=event.node_id,
+                )
+
+        logger.info(f"structuring: shrank {event.label!r} ({event.node_id}) into a sticky")
+
+    async def _summarize(self, event: SealEvent) -> str:
+        messages = [
+            {"role": "system", "content": _SUMMARY_SYSTEM},
+            {"role": "user", "content": f"TOPIC: {event.label!r}\n\nRAW TRANSCRIPT:\n{event.raw}"},
+        ]
+        tool_calls = await self._call_llm(
+            self._config["render_model"],  # type: ignore[index]
+            messages,
+            _SUMMARY_TOOL,
+            forced_tool="summarize_topic",
+        )
+        if not tool_calls:
+            return ""
+        return str(_parse_args(tool_calls[0]).get("summary", "")).strip()
 
     # ------------------------------------------------------------------
     # LLM call — injectable for tests (monkeypatch _call_llm).

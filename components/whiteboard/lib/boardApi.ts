@@ -2,6 +2,7 @@ import {
   Editor,
   TLShapeId,
   createShapeId,
+  toRichText,
 } from '@tldraw/tldraw'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { sanitizeMarkdown } from '../editor/markdown'
@@ -65,7 +66,7 @@ export function addNote(
     const existing = getTLId(internalId)
     if (existing && editor.getShape(existing)) {
       // Upsert: update the existing note in place.
-      editor.updateShape({ id: existing, type: 'note', props: { text, color: color ?? 'yellow' } })
+      editor.updateShape({ id: existing, type: 'note', props: { richText: toRichText(text), color: color ?? 'yellow' } })
       return
     }
     setTLId(internalId, tlId)
@@ -75,7 +76,7 @@ export function addNote(
     type: 'note',
     x: pos.x,
     y: pos.y,
-    props: { text, color: color ?? 'yellow', size: 'm', font: 'sans' },
+    props: { richText: toRichText(text), color: color ?? 'yellow', size: 'm', font: 'sans' },
   })
   scheduleAppearAnimation(editor, tlId)
 }

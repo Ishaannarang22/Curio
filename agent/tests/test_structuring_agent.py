@@ -46,6 +46,11 @@ def _render_call(tool: str, args: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"id": "c", "type": "function", "function": {"name": tool, "arguments": json.dumps(args)}}]
 
 
+def _summary_call(summary: str) -> list[dict[str, Any]]:
+    return [{"id": "c", "type": "function",
+             "function": {"name": "summarize_topic", "arguments": json.dumps({"summary": summary})}}]
+
+
 def _make_agent(bridge: FakeBridge, state: InMemoryBoardState) -> StructuringAgent:
     agent = StructuringAgent(session="test", state=state, bridge=bridge)
     # Force-enable with a fake config (the patched _call_llm ignores url/key).
@@ -57,25 +62,44 @@ def _make_agent(bridge: FakeBridge, state: InMemoryBoardState) -> StructuringAge
     return agent
 
 
-def _script(agent: StructuringAgent, *, router, render) -> None:
+def _script(agent: StructuringAgent, *, router, render=None, summary=None) -> None:
     """Monkeypatch _call_llm to answer per forced_tool."""
     async def fake_call(model, messages, tools, *, forced_tool):
         if forced_tool == "plan_structure":
             return router
-        return render
+        if forced_tool == "summarize_topic":
+            return summary or []
+        return render or []
     agent._call_llm = fake_call  # type: ignore[assignment]
 
 
-async def test_no_restructure_leaves_raw():
+async def test_no_diagram_shrinks_raw_into_sticky():
     bridge, state = FakeBridge(), InMemoryBoardState(session="test")
     await state.upsert_block({"id": "leaf-1", "topicId": "leaf-1", "type": "notes",
                               "title": "T", "content": "raw", "bbox": {"x": 100, "y": 100, "w": 480, "h": 200}})
     agent = _make_agent(bridge, state)
-    _script(agent, router=_router_call(False), render=[])
+    _script(agent, router=_router_call(False), summary=_summary_call("Osmosis: water across a membrane"))
 
     await agent._structure(SealEvent("leaf-1", "Topic", "leaf", "some short raw", "sibling"))
 
-    # No artifact written, raw block untouched.
+    # Verbose markdown removed; replaced by a sticky at the same block id.
+    assert "removeNode" in bridge.actions()
+    assert "addNote" in bridge.actions()
+    assert "leaf-1" in bridge.removed_ids()
+    block = await state.get_block("leaf-1")
+    assert block["type"] == "note"
+
+
+async def test_no_diagram_empty_summary_keeps_raw():
+    bridge, state = FakeBridge(), InMemoryBoardState(session="test")
+    await state.upsert_block({"id": "leaf-1", "topicId": "leaf-1", "type": "notes",
+                              "title": "T", "content": "raw", "bbox": {"x": 100, "y": 100, "w": 480, "h": 200}})
+    agent = _make_agent(bridge, state)
+    _script(agent, router=_router_call(False), summary=[])  # summarizer returns nothing
+
+    await agent._structure(SealEvent("leaf-1", "Topic", "leaf", "some short raw", "sibling"))
+
+    # Fallback: leave the raw markdown rather than blank the topic.
     assert bridge.actions() == []
     assert (await state.get_block("leaf-1"))["type"] == "notes"
 

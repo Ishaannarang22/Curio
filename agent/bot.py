@@ -141,6 +141,7 @@ from pipecat.workers.runner import WorkerRunner
 import tuning
 from board_state import BoardState, InMemoryBoardState
 from structuring_agent import StructuringAgent
+from spawner_agent import SpawnerAgent
 from topic_boundary import TopicBoundaryProcessor
 
 # Load env from agent/.env (optional) AND the repo root .env.local, so the
@@ -491,8 +492,17 @@ async def bot(runner_args: RunnerArguments):
     await board_state.connect()
 
     structuring = StructuringAgent(session=session_id, state=board_state)
+    spawner = SpawnerAgent(session=session_id, state=board_state)
+
+    async def _on_seal(event: Any) -> None:
+        # Fan each seal out to both workers (Structuring → main artifact,
+        # Spawner → faithful margin visuals). Both only enqueue and return
+        # instantly, so the boundary classifier is never blocked.
+        await structuring.on_seal(event)
+        await spawner.on_seal(event)
+
     topic_boundary = TopicBoundaryProcessor(
-        session=session_id, state=board_state, on_seal=structuring.on_seal
+        session=session_id, state=board_state, on_seal=_on_seal
     )
 
     pipeline = Pipeline(
@@ -557,8 +567,9 @@ async def bot(runner_args: RunnerArguments):
         sentry_sdk.capture_exception(e)
         raise
     finally:
-        await topic_boundary.close()   # seals the trailing topic → fires structuring
+        await topic_boundary.close()   # seals the trailing topic → fires both workers
         await structuring.close()      # drain queued seals, then close
+        await spawner.close()          # drain queued seals, then close
         await board_state.aclose()     # owner of the shared state closes it
         if store:
             await store.close()
