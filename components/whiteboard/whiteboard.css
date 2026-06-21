@@ -1,18 +1,8 @@
-/* Notion-style fonts are loaded via @fontsource imports in main.tsx
-   (Inter for text, JetBrains Mono for code). */
-
-* {
-  box-sizing: border-box;
-}
-
-html, body, #root {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  font-family: 'Inter', system-ui, sans-serif;
-}
+/* Notion-style fonts are loaded via @fontsource imports in WhiteboardApp.tsx
+   (Inter for text, JetBrains Mono for code). The whiteboard mounts into a
+   position:fixed inset:0 container (see app/whiteboard/page.tsx), so the old
+   html/body/#root viewport resets from the Vite app are no longer needed and
+   would leak into other Next routes. */
 
 /* Shape appear animation — fade + slight scale-in.
    IMPORTANT: this must NOT be applied to `.tl-shape`. tldraw positions every

@@ -1,3 +1,5 @@
+'use client'
+
 // Novel-style "/" slash command menu, vendored.
 // Built on @tiptap/suggestion (the same primitive @-mentions use): typing "/"
 // opens a filterable popup of block types; arrow keys + Enter (or click) insert.
