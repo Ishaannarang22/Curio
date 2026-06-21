@@ -18,6 +18,7 @@ Tool → board action mapping:
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any
 
@@ -29,7 +30,7 @@ from loguru import logger
 # Default bridge endpoint
 # ---------------------------------------------------------------------------
 
-WHITEBOARD_SEND_URL: str = os.getenv("WHITEBOARD_SEND_URL", "http://localhost:8081/send")
+WHITEBOARD_SEND_URL: str = os.getenv("WHITEBOARD_SEND_URL", "http://localhost:3000/api/board/send")
 
 # ---------------------------------------------------------------------------
 # Content size caps — prevent unbounded data from landing in Redis / the bridge.
@@ -42,6 +43,13 @@ _MAX_TITLE_CHARS   = 500         # generous but bounded block title
 _MAX_LABEL_CHARS   = 500         # flowchart step / mind-map branch label
 _MAX_STEPS         = 100         # max flowchart steps per call
 _MAX_BRANCHES      = 100         # max mind-map branches per call
+_VALID_ID = re.compile(r"^[\w\-:.]{1,128}$")
+
+
+def _valid_id(value: Any, field: str = "id") -> str:
+    if not isinstance(value, str) or not _VALID_ID.fullmatch(value):
+        raise ValueError(f"invalid {field}")
+    return value
 
 
 def _clamp_str(s: str, max_chars: int, field: str = "field") -> str:
@@ -371,22 +379,37 @@ class BridgePoster:
     during startup) and the voice pipeline must not crash.
     """
 
-    def __init__(self, send_url: str = WHITEBOARD_SEND_URL) -> None:
+    def __init__(
+        self,
+        send_url: str = WHITEBOARD_SEND_URL,
+        *,
+        session: str = "default",
+        token: str | None = None,
+    ) -> None:
         self._send_url = send_url
+        # session routes the command to the matching browser SSE subscriber;
+        # token authenticates the write when the bridge has BOARD_API_TOKEN set.
+        self._session = session
+        self._token = token if token is not None else os.getenv("BOARD_API_TOKEN")
+        self._client = httpx.AsyncClient(timeout=5.0)
 
     async def send(self, action: str, payload: dict[str, Any]) -> None:
         """Fire-and-forget POST.  Swallows all errors."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    self._send_url,
-                    json={"action": action, "payload": payload},
-                )
-                resp.raise_for_status()
-                logger.debug(f"bridge ← {action} ({resp.status_code})")
+            headers = {"x-board-api-token": self._token} if self._token else None
+            resp = await self._client.post(
+                self._send_url,
+                json={"action": action, "payload": payload, "session": self._session},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            logger.debug(f"bridge ← {action} ({resp.status_code})")
         except Exception as exc:
             logger.warning(f"BridgePoster.send({action!r}) failed (bridge may be down): {exc}")
             sentry_sdk.capture_exception(exc)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
 # ---------------------------------------------------------------------------
 # Placement helpers
@@ -494,20 +517,21 @@ async def execute_tool_call(
     """
     import json as _json
 
-    fn = tool_call.get("function", {})
-    tool_name: str = fn.get("name", "")
-    raw_args = fn.get("arguments", {})
-    args: dict[str, Any] = (
-        _json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
-    )
-
-    # Prefer the topicId the model explicitly supplied in the tool args; fall
-    # back to the harness-injected active_topic so legacy callers still work.
-    effective_topic: str = args.get("topicId") or active_topic
-
-    logger.debug(f"execute_tool_call: tool={tool_name!r} topic={effective_topic!r} args={args}")
-
     try:
+        fn = tool_call.get("function", {})
+        tool_name: str = fn.get("name", "")
+        raw_args = fn.get("arguments", {})
+        args: dict[str, Any] = (
+            _json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+        )
+        if not isinstance(args, dict):
+            raise ValueError("tool arguments must be an object")
+
+        # Prefer the topicId the model explicitly supplied in the tool args; fall
+        # back to the harness-injected active_topic so legacy callers still work.
+        effective_topic: str = _valid_id(args.get("topicId") or active_topic, "topicId")
+
+        logger.debug(f"execute_tool_call: tool={tool_name!r} topic={effective_topic!r} args={args}")
         result = await _dispatch(
             tool_name, args,
             state=state,
@@ -544,7 +568,7 @@ async def _dispatch(
     elif tool_name == "remove_block":
         return await _remove_block(args, state=state, bridge=bridge)
     elif tool_name == "clear_board":
-        return await _clear_board(bridge=bridge)
+        return await _clear_board(state=state, bridge=bridge)
     else:
         raise ValueError(f"Unknown tool: {tool_name!r}")
 
@@ -561,7 +585,7 @@ async def _write_notes(
     bridge: BridgePoster,
     active_topic: str,
 ) -> dict[str, Any]:
-    block_id: str = args["id"]
+    block_id: str = _valid_id(args["id"])
     title: str = _clamp_str(args.get("title", ""), _MAX_TITLE_CHARS, "title")
     markdown: str = _clamp_str(args.get("markdown", ""), _MAX_CONTENT_BYTES, "markdown")
     anchor: dict[str, Any] | None = args.get("anchor")
@@ -595,7 +619,7 @@ async def _make_flowchart(
     bridge: BridgePoster,
     active_topic: str,
 ) -> dict[str, Any]:
-    block_id: str = args["id"]
+    block_id: str = _valid_id(args["id"])
     title: str = _clamp_str(args.get("title", ""), _MAX_TITLE_CHARS, "title")
     # Cap step count and per-step label lengths to bound Redis write size.
     raw_steps: list[dict[str, Any]] = args.get("steps", [])
@@ -603,7 +627,11 @@ async def _make_flowchart(
         logger.warning(f"board_tools: flowchart steps truncated from {len(raw_steps)} to {_MAX_STEPS}")
         raw_steps = raw_steps[:_MAX_STEPS]
     steps: list[dict[str, Any]] = [
-        {**s, "label": _clamp_str(s.get("label", ""), _MAX_LABEL_CHARS, "step.label")}
+        {
+            **s,
+            "id": _valid_id(s.get("id"), "step.id"),
+            "label": _clamp_str(s.get("label", ""), _MAX_LABEL_CHARS, "step.label"),
+        }
         for s in raw_steps
     ]
     anchor: dict[str, Any] | None = args.get("anchor")
@@ -643,7 +671,7 @@ async def _make_mindmap(
     bridge: BridgePoster,
     active_topic: str,
 ) -> dict[str, Any]:
-    block_id: str = args["id"]
+    block_id: str = _valid_id(args["id"])
     center_label: str = _clamp_str(args.get("center", ""), _MAX_LABEL_CHARS, "center")
     # Cap branch count and per-branch label lengths to bound Redis write size.
     raw_branches: list[dict[str, Any]] = args.get("branches", [])
@@ -651,7 +679,11 @@ async def _make_mindmap(
         logger.warning(f"board_tools: mindmap branches truncated from {len(raw_branches)} to {_MAX_BRANCHES}")
         raw_branches = raw_branches[:_MAX_BRANCHES]
     branches: list[dict[str, Any]] = [
-        {**b, "label": _clamp_str(b.get("label", ""), _MAX_LABEL_CHARS, "branch.label")}
+        {
+            **b,
+            "id": _valid_id(b.get("id"), "branch.id"),
+            "label": _clamp_str(b.get("label", ""), _MAX_LABEL_CHARS, "branch.label"),
+        }
         for b in raw_branches
     ]
     anchor: dict[str, Any] | None = args.get("anchor")
@@ -694,7 +726,7 @@ async def _add_image(
     bridge: BridgePoster,
     active_topic: str,
 ) -> dict[str, Any]:
-    block_id: str = args["id"]
+    block_id: str = _valid_id(args["id"])
     prompt: str = _clamp_str(args.get("prompt", ""), _MAX_TITLE_CHARS, "prompt")
     caption_raw: str | None = args.get("caption")
     caption: str | None = _clamp_str(caption_raw, _MAX_TITLE_CHARS, "caption") if caption_raw else None
@@ -729,7 +761,7 @@ async def _highlight(
     *,
     bridge: BridgePoster,
 ) -> dict[str, Any]:
-    block_id: str = args["id"]
+    block_id: str = _valid_id(args["id"])
     # highlightNode targets the block id; no state write needed.
     await bridge.send("highlightNode", {"id": block_id})
     return {"action": "highlightNode", "id": block_id}
@@ -741,7 +773,7 @@ async def _remove_block(
     state: Any,
     bridge: BridgePoster,
 ) -> dict[str, Any]:
-    block_id: str = args["id"]
+    block_id: str = _valid_id(args["id"])
 
     # Look up child shape ids so we can remove each shape individually.
     existing = await state.get_block(block_id)
@@ -762,8 +794,11 @@ async def _remove_block(
 
 async def _clear_board(
     *,
+    state: Any,
     bridge: BridgePoster,
 ) -> dict[str, Any]:
     await bridge.send("clearBoard", {})
-    # Note: caller should also invoke state.clear() if a full reset is desired.
+    clear = getattr(state, "clear", None)
+    if clear is not None:
+        await clear()
     return {"action": "clearBoard"}

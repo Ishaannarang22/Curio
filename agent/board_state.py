@@ -31,6 +31,20 @@ def _redact_url(url: str) -> str:
 
 # Default Redis URL; callers may override via constructor.
 _DEFAULT_REDIS_URL = "redis://localhost:6379"
+_VALID_KEY_PART = re.compile(r"^[\w\-:.]{1,128}$")
+_MAX_CONTENT_CHARS = 64 * 1024
+_MAX_SHAPE_IDS = 200
+_MAX_TITLE_CHARS = 500
+
+
+def _is_valid_key_part(value: Any) -> bool:
+    return isinstance(value, str) and bool(_VALID_KEY_PART.fullmatch(value))
+
+
+def validate_key_part(value: Any, field: str = "id") -> str:
+    if not _is_valid_key_part(value):
+        raise ValueError(f"invalid {field}")
+    return value
 
 
 def _block_key(session: str, block_id: str) -> str:
@@ -75,6 +89,7 @@ class BoardState:
         *,
         client: aioredis.Redis | None = None,
     ) -> None:
+        validate_key_part(session, "session")
         self._redis_url = redis_url
         self._session = session
         # If a client is injected (e.g. fakeredis in tests), use it directly and
@@ -133,6 +148,7 @@ class BoardState:
         if client is None:
             return
         try:
+            topic_id = validate_key_part(topic_id, "topic_id")
             await client.set(_active_topic_key(self._session), topic_id)
         except Exception as exc:
             logger.error(f"BoardState.set_active_topic failed: {exc}")
@@ -165,18 +181,35 @@ class BoardState:
         if client is None:
             return
         try:
-            block_id: str = rec["id"]
-            topic_id: str = rec.get("topicId", "")
+            block_id: str = validate_key_part(rec["id"], "block_id")
+            topic_id_raw: str = rec.get("topicId", "")
+            topic_id: str = validate_key_part(topic_id_raw, "topic_id") if topic_id_raw else ""
+            content = str(rec.get("content", ""))[:_MAX_CONTENT_CHARS]
+            title = str(rec.get("title", ""))[:_MAX_TITLE_CHARS]
+            raw_shape_ids = rec.get("shapeIds") or []
+            if not isinstance(raw_shape_ids, list):
+                raw_shape_ids = []
+            shape_ids = [
+                validate_key_part(shape_id, "shape_id")
+                for shape_id in raw_shape_ids[:_MAX_SHAPE_IDS]
+            ]
+            existing_raw = await client.get(_block_key(self._session, block_id))
+            previous_topic: str | None = None
+            if existing_raw:
+                try:
+                    previous_topic = json.loads(existing_raw).get("topicId")
+                except Exception:
+                    previous_topic = None
 
             # Normalise / default missing fields.
             normalised: dict[str, Any] = {
                 "id": block_id,
                 "topicId": topic_id,
                 "type": rec.get("type", "notes"),
-                "title": rec.get("title", ""),
-                "content": rec.get("content", ""),
+                "title": title,
+                "content": content,
                 "bbox": rec.get("bbox") or {"x": 0, "y": 0, "w": 0, "h": 0},
-                "shapeIds": rec.get("shapeIds") or [],
+                "shapeIds": shape_ids,
                 "updatedAt": rec.get("updatedAt") or time.time(),
             }
 
@@ -188,6 +221,8 @@ class BoardState:
             pipe.sadd(_index_key(self._session), block_id)
             if topic_id:
                 pipe.sadd(_topic_key(self._session, topic_id), block_id)
+            if previous_topic and previous_topic != topic_id and _is_valid_key_part(previous_topic):
+                pipe.srem(_topic_key(self._session, previous_topic), block_id)
             await pipe.execute()
         except Exception as exc:
             logger.error(f"BoardState.upsert_block failed: {exc}")
@@ -199,6 +234,7 @@ class BoardState:
         if client is None:
             return None
         try:
+            validate_key_part(block_id, "block_id")
             raw = await client.get(_block_key(self._session, block_id))
             if raw is None:
                 return None
@@ -214,6 +250,7 @@ class BoardState:
         if client is None:
             return
         try:
+            validate_key_part(block_id, "block_id")
             # Read the record first to know the topicId (needed for topic set removal).
             raw = await client.get(_block_key(self._session, block_id))
             topic_id: str | None = None
@@ -243,6 +280,7 @@ class BoardState:
         if client is None:
             return
         try:
+            validate_key_part(block_id, "block_id")
             raw = await client.get(_block_key(self._session, block_id))
             if raw is None:
                 logger.debug(f"BoardState.update_geometry: block {block_id!r} not found, skipping")
@@ -265,6 +303,7 @@ class BoardState:
         if client is None:
             return []
         try:
+            validate_key_part(topic_id, "topic_id")
             block_ids: set[str] = await client.smembers(_topic_key(self._session, topic_id))
             if not block_ids:
                 return []

@@ -25,16 +25,6 @@ function setTLId(internalId: string, tlId: TLShapeId) {
   idMap.set(internalId, tlId)
 }
 
-// ─── Animation helpers ────────────────────────────────────────────────────────
-const APPEAR_DURATION = 200 // ms for fade-in on new shapes
-
-function animateIn(editor: Editor, shapeId: TLShapeId) {
-  // tldraw v3 doesn't expose opacity animation natively via animateShape,
-  // so we drive it via a CSS class injected on the HTML container.
-  // The shape component itself handles the CSS animation via @keyframes.
-  editor.updateShape({ id: shapeId, type: editor.getShape(shapeId)!.type, props: {} })
-}
-
 async function animateShapeTo(
   editor: Editor,
   shapeId: TLShapeId,
@@ -387,6 +377,13 @@ export function requestImage(
 export function resolveImage(editor: Editor, internalId: string, url: string) {
   const tlId = getTLId(internalId)
   if (!tlId) return
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return
+  }
+  if (!['https:', 'http:'].includes(parsed.protocol)) return
   editor.updateShape({
     id: tlId,
     type: 'image-node',
@@ -428,16 +425,18 @@ export function clearBoard(editor: Editor) {
 // ─── addMindMap ───────────────────────────────────────────────────────────────
 export async function addMindMap(
   editor: Editor,
+  blockId: string,
   centerLabel: string,
-  branches: { id: string; label: string }[]
+  branches: { id: string; label: string }[],
+  position?: { x: number; y: number }
 ) {
-  const centerId = '__mindmap_center__'
+  const centerId = `${blockId}__center`
 
   // Anchor the whole map at the current viewport center so it's never
   // laid out off-screen near page origin (0,0).
   const vp = editor.getViewportPageBounds()
-  const anchorX = vp.x + vp.w / 2
-  const anchorY = vp.y + vp.h / 2
+  const anchorX = position?.x ?? vp.x + vp.w / 2
+  const anchorY = position?.y ?? vp.y + vp.h / 2
 
   // Create center if needed
   let centerTlId = getTLId(centerId)
@@ -553,7 +552,8 @@ async function runD3ForceLayout(
 // ─── addFlowchart ─────────────────────────────────────────────────────────────
 export async function addFlowchart(
   editor: Editor,
-  steps: { id: string; label: string; subtitle?: string }[]
+  steps: { id: string; label: string; subtitle?: string }[],
+  position?: { x: number; y: number }
 ) {
   editor.batch(() => {
     for (const step of steps) {
@@ -584,7 +584,7 @@ export async function addFlowchart(
     }
   })
 
-  await runElkLayout(editor, steps)
+  await runElkLayout(editor, steps, position)
 
   // Bring the whole flowchart comfortably into view.
   await zoomToContent(editor)
@@ -592,7 +592,8 @@ export async function addFlowchart(
 
 async function runElkLayout(
   editor: Editor,
-  steps: { id: string }[]
+  steps: { id: string }[],
+  position?: { x: number; y: number }
 ) {
   const elkNodes = steps.map((s) => {
     const tlId = getTLId(s.id)!
@@ -623,8 +624,8 @@ async function runElkLayout(
   })
 
   const vp = editor.getViewportPageBounds()
-  const originX = vp.x + vp.w / 2 - (graph.width ?? 0) / 2
-  const originY = vp.y + vp.h / 4
+  const originX = position?.x ?? vp.x + vp.w / 2 - (graph.width ?? 0) / 2
+  const originY = position?.y ?? vp.y + vp.h / 4
 
   const promises = (graph.children ?? []).map((node) => {
     const tlId = getTLId(node.id)

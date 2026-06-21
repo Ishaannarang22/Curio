@@ -17,14 +17,15 @@ import { FlowNodeUtil } from './shapes/FlowNode'
 import { ExplanationCardUtil } from './shapes/ExplanationCard'
 import { ImageNodeUtil } from './shapes/ImageNode'
 import { MarkdownDocUtil } from './shapes/MarkdownDoc'
-import { setEditor, connectWebSocket } from './lib/commandQueue'
+import { setEditor, connectBoardStream } from './lib/commandQueue'
+import { VoiceConnect } from './VoiceConnect'
 // M4 board-side Redis sync — best-effort, board still works if /api/board is down.
 import { setSession, fetchBoard, reportGeometry } from './lib/boardSync'
 
 const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil, MarkdownDocUtil]
 
 interface WhiteboardAppProps {
-  /** Session id used to namespace this board in Redis.
+  /** Session id used to namespace this board in Redis and the SSE stream.
    *  Defaults to the `?session=` URL param, or "default" if absent. */
   session?: string
 }
@@ -35,14 +36,19 @@ function getSessionFromUrl(): string {
 }
 
 export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
+  // Derive session once (before handleMount so VoiceConnect gets the same value).
+  const sess = session ?? (typeof window !== 'undefined' ? getSessionFromUrl() : 'default')
+
   const handleMount = useCallback((editor: Editor) => {
     setEditor(editor)
-    connectWebSocket('ws://localhost:8080') // keep existing WS connect untouched
+
+    // Connect to the same-origin SSE board stream (replaced the old WS mock server).
+    // The stream is served by /api/board/stream?session=<sess> (:3000, same-origin).
+    connectBoardStream(sess)
 
     editor.updateInstanceState({ isDebugMode: false })
 
     // ── M4: derive session id and initialise the sync helper ─────────────────
-    const sess = session ?? getSessionFromUrl()
     setSession(sess)
 
     // ── M4: restore-on-mount — fetch board snapshot from Redis ───────────────
@@ -84,7 +90,7 @@ export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
     // Return value from useCallback is ignored by tldraw; store unsub for cleanup.
     // We attach it to the editor instance as a non-reactive property.
     ;(editor as Editor & { _boardSyncUnsub?: () => void })._boardSyncUnsub = unsub
-  }, [session])
+  }, [sess])
 
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
@@ -93,6 +99,8 @@ export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
         onMount={handleMount}
         autoFocus
       />
+      {/* Floating voice connect button — talks to the pipecat agent at :7860 */}
+      <VoiceConnect session={sess} />
     </div>
   )
 }

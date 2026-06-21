@@ -6,8 +6,31 @@ type Command = {
   payload: Record<string, unknown>
 }
 
+const MAX_MESSAGE_BYTES = 128 * 1024
+const MAX_TEXT_CHARS = 64 * 1024
+const MAX_LABEL_CHARS = 500
+const MAX_ITEMS = 100
+const VALID_ID = /^[\w\-:.]{1,128}$/
+const ALLOWED_ACTIONS = new Set([
+  'addNote',
+  'addExplanation',
+  'appendToExplanation',
+  'addMarkdown',
+  'addFlowNode',
+  'addMindMapNode',
+  'connectNodes',
+  'updateNode',
+  'removeNode',
+  'addMindMap',
+  'addFlowchart',
+  'requestImage',
+  'resolveImage',
+  'highlightNode',
+  'clearBoard',
+])
+
 // ─── Sequential command queue ─────────────────────────────────────────────────
-let queue: Command[] = []
+const queue: Command[] = []
 let running = false
 let editorRef: Editor | null = null
 
@@ -15,9 +38,81 @@ export function setEditor(editor: Editor) {
   editorRef = editor
 }
 
-export function enqueue(cmd: Command) {
+export function enqueue(cmd: unknown) {
+  if (!isValidCommand(cmd)) {
+    console.warn('[commandQueue] Rejected invalid command')
+    return
+  }
   queue.push(cmd)
   if (!running) drain()
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isId(value: unknown): value is string {
+  return typeof value === 'string' && VALID_ID.test(value)
+}
+
+function isString(value: unknown, max = MAX_TEXT_CHARS): value is string {
+  return typeof value === 'string' && value.length <= max
+}
+
+function isPosition(value: unknown): value is { x: number; y: number } {
+  if (value === undefined) return true
+  if (!isRecord(value)) return false
+  return Number.isFinite(value.x) && Number.isFinite(value.y)
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (!isString(value, 2048)) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || (location.hostname === 'localhost' && url.protocol === 'http:')
+  } catch {
+    return false
+  }
+}
+
+function isValidCommand(cmd: unknown): cmd is Command {
+  if (!isRecord(cmd) || !isString(cmd.action, 64) || !ALLOWED_ACTIONS.has(cmd.action)) return false
+  if (!isRecord(cmd.payload)) return false
+  const p = cmd.payload
+
+  switch (cmd.action) {
+    case 'addNote':
+      return isString(p.text) && isPosition(p.position)
+    case 'addExplanation':
+      return isId(p.id) && isString(p.text) && isPosition(p.position)
+    case 'appendToExplanation':
+      return isId(p.id) && isString(p.moreText)
+    case 'addMarkdown':
+      return (p.id === undefined || isId(p.id)) && isString(p.markdown) && isPosition(p.position)
+    case 'addFlowNode':
+      return isId(p.id) && isString(p.label, MAX_LABEL_CHARS) && isPosition(p.position)
+    case 'addMindMapNode':
+      return isId(p.id) && isString(p.label, MAX_LABEL_CHARS) && (p.parentId === undefined || isId(p.parentId)) && isPosition(p.position)
+    case 'connectNodes':
+      return isId(p.fromId) && isId(p.toId) && (p.label === undefined || isString(p.label, MAX_LABEL_CHARS))
+    case 'updateNode':
+      return isId(p.id) && isString(p.newLabel, MAX_LABEL_CHARS)
+    case 'removeNode':
+    case 'highlightNode':
+      return isId(p.id)
+    case 'addMindMap':
+      return isId(p.id) && isString(p.centerLabel, MAX_LABEL_CHARS) && Array.isArray(p.branches) && p.branches.length <= MAX_ITEMS && p.branches.every((b) => isRecord(b) && isId(b.id) && isString(b.label, MAX_LABEL_CHARS)) && isPosition(p.position)
+    case 'addFlowchart':
+      return isId(p.id) && Array.isArray(p.steps) && p.steps.length <= MAX_ITEMS && p.steps.every((s) => isRecord(s) && isId(s.id) && isString(s.label, MAX_LABEL_CHARS) && (s.subtitle === undefined || isString(s.subtitle, MAX_LABEL_CHARS))) && isPosition(p.position)
+    case 'requestImage':
+      return isId(p.id) && isString(p.prompt, MAX_LABEL_CHARS) && isPosition(p.position)
+    case 'resolveImage':
+      return isId(p.id) && isHttpsUrl(p.url)
+    case 'clearBoard':
+      return true
+    default:
+      return false
+  }
 }
 
 async function drain() {
@@ -87,11 +182,11 @@ async function execute(cmd: Command) {
         break
 
       case 'addMindMap':
-        await api.addMindMap(editor, p.centerLabel as string, p.branches as { id: string; label: string }[])
+        await api.addMindMap(editor, p.id as string, p.centerLabel as string, p.branches as { id: string; label: string }[], p.position as { x: number; y: number } | undefined)
         break
 
       case 'addFlowchart':
-        await api.addFlowchart(editor, p.steps as { id: string; label: string; subtitle?: string }[])
+        await api.addFlowchart(editor, p.steps as { id: string; label: string; subtitle?: string }[], p.position as { x: number; y: number } | undefined)
         break
 
       case 'requestImage':
@@ -125,48 +220,72 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
 }
 
-// ─── WebSocket client ─────────────────────────────────────────────────────────
-let ws: WebSocket | null = null
-let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+// ─── SSE transport (replaces the old WebSocket client) ───────────────────────
+let sseSource: EventSource | null = null
+let currentSession: string | null = null
 
-export function connectWebSocket(url = 'ws://localhost:8080') {
-  // Idempotent: if a socket is already connecting or open, don't tear it down.
-  // (React StrictMode mounts components twice in dev, which would otherwise
-  // close the first socket mid-handshake and force a needless reconnect.)
-  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+/**
+ * Connect to the board SSE stream for a given session.
+ * Same-origin call to /api/board/stream?session=<session>.
+ * EventSource handles auto-reconnect natively.
+ *
+ * Idempotent: calling again with the same session is a no-op.
+ * Calling with a different session tears down the old connection first.
+ */
+export function connectBoardStream(session = 'default') {
+  if (sseSource && currentSession === session) {
+    // Already connected to this session — no-op (guards React StrictMode double-mount).
     return
   }
 
-  ws = new WebSocket(url)
+  // Tear down any previous connection.
+  disconnectBoardStream()
 
-  ws.onopen = () => {
-    console.log('[WS] Connected to', url)
-    if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null }
+  currentSession = session
+  const url = `/api/board/stream?session=${encodeURIComponent(session)}`
+
+  sseSource = new EventSource(url)
+
+  sseSource.onopen = () => {
+    console.log(`[boardStream] Connected  session=${session}`)
   }
 
-  ws.onmessage = (event) => {
+  sseSource.onmessage = (event) => {
     try {
-      const cmd: Command = JSON.parse(event.data as string)
+      const raw: string = event.data
+      if (!raw || raw.length > MAX_MESSAGE_BYTES) {
+        console.warn('[boardStream] Rejected oversized message')
+        return
+      }
+      const cmd: Command = JSON.parse(raw)
       enqueue(cmd)
     } catch (e) {
-      console.error('[WS] Bad message', e)
+      console.error('[boardStream] Bad message', e)
     }
   }
 
-  ws.onclose = () => {
-    if (reconnectTimeout) return // a reconnect is already scheduled
-    console.warn('[WS] Disconnected. Reconnecting in 3s…')
-    reconnectTimeout = setTimeout(() => { reconnectTimeout = null; connectWebSocket(url) }, 3000)
-  }
-
-  ws.onerror = () => {
-    // onclose fires right after onerror and handles reconnection.
-    console.warn('[WS] Connection error (will retry)')
+  sseSource.onerror = () => {
+    // EventSource re-establishes the connection automatically after a brief
+    // back-off; we just log the transient error here.
+    console.warn('[boardStream] Connection error — EventSource will retry')
   }
 }
 
+export function disconnectBoardStream() {
+  sseSource?.close()
+  sseSource = null
+  currentSession = null
+}
+
+// ─── Backward-compatible alias ────────────────────────────────────────────────
+/** @deprecated Use connectBoardStream() instead. */
+export function connectWebSocket(_url?: string) {
+  // No-op: kept so any import that still references connectWebSocket compiles.
+  // WhiteboardApp.tsx has been updated to call connectBoardStream directly.
+  console.warn('[commandQueue] connectWebSocket() is deprecated — use connectBoardStream()')
+}
+
+/** @deprecated Use disconnectBoardStream() instead. */
 export function disconnectWebSocket() {
-  if (reconnectTimeout) clearTimeout(reconnectTimeout)
-  ws?.close()
-  ws = null
+  disconnectBoardStream()
 }

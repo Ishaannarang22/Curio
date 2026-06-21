@@ -215,8 +215,9 @@ class BoardWriter(FrameProcessor):
         self._llm_enabled = self._config is not None
         self._http = httpx.AsyncClient(timeout=30)
 
-        # Bridge (injected or real)
-        self._bridge: Any = bridge or BridgePoster(self._send_url)
+        # Bridge (injected or real). Pass the session so board commands route to
+        # the matching browser SSE subscriber (/api/board/stream?session=).
+        self._bridge: Any = bridge or BridgePoster(self._send_url, session=self._session)
 
         # State (injected or real)
         if state is not None:
@@ -282,6 +283,9 @@ class BoardWriter(FrameProcessor):
         if self._tasks:
             await asyncio.wait(self._tasks, timeout=5)
         await self._http.aclose()
+        close_bridge = getattr(self._bridge, "aclose", None)
+        if close_bridge is not None:
+            await close_bridge()
         if self._owns_state:
             await self._state.aclose()
 
@@ -411,10 +415,14 @@ class BoardWriter(FrameProcessor):
         import json as _json
         for tc in tool_calls:
             raw_args = tc.get("function", {}).get("arguments", {})
-            args: dict[str, Any] = (
-                _json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
-            )
-            topic = args.get("topicId", "")
+            try:
+                args: dict[str, Any] = (
+                    _json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+                )
+            except Exception as exc:
+                logger.warning(f"Skipping malformed tool-call arguments while extracting topic: {exc}")
+                continue
+            topic = args.get("topicId", "") if isinstance(args, dict) else ""
             if topic:
                 return str(topic)
         return ""

@@ -47,6 +47,36 @@ interface GeometryUpdate { id: string; bbox: BBox }
 // Maximum number of geometry updates accepted in a single batched POST.
 // Prevents a single request from spawning an unbounded number of Redis R-M-W ops.
 const MAX_UPDATES_PER_REQUEST = 200
+const MAX_REQUEST_BYTES = 128 * 1024
+const MAX_BLOCKS_PER_RESPONSE = 500
+const MAX_RECORD_BYTES = 128 * 1024
+const MAX_ABS_COORDINATE = 1_000_000
+const MAX_DIMENSION = 100_000
+
+const GEOMETRY_UPDATE_SCRIPT = `
+local key = KEYS[1]
+local existing = redis.call("GET", key)
+if not existing then
+  return 0
+end
+local record
+local ok, decoded = pcall(cjson.decode, existing)
+if ok and type(decoded) == "table" then
+  record = decoded
+else
+  return 0
+end
+record["id"] = record["id"] or ARGV[1]
+record["bbox"] = {
+  x = tonumber(ARGV[2]),
+  y = tonumber(ARGV[3]),
+  w = tonumber(ARGV[4]),
+  h = tonumber(ARGV[5])
+}
+record["updatedAt"] = ARGV[6]
+redis.call("SET", key, cjson.encode(record))
+return 1
+`
 
 function isValidSession(s: unknown): s is string {
   return typeof s === 'string' && s.length > 0 && s.length <= 128 && /^[\w\-:.]+$/.test(s)
@@ -59,7 +89,80 @@ function isValidId(s: unknown): s is string {
 function isValidBBox(b: unknown): b is BBox {
   if (!b || typeof b !== 'object') return false
   const { x, y, w, h } = b as Record<string, unknown>
-  return [x, y, w, h].every((v) => typeof v === 'number' && isFinite(v))
+  return (
+    [x, y, w, h].every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+    Math.abs(x as number) <= MAX_ABS_COORDINATE &&
+    Math.abs(y as number) <= MAX_ABS_COORDINATE &&
+    (w as number) >= 0 &&
+    (h as number) >= 0 &&
+    (w as number) <= MAX_DIMENSION &&
+    (h as number) <= MAX_DIMENSION
+  )
+}
+
+function safeJson(data: unknown, init?: ResponseInit): NextResponse {
+  return NextResponse.json(data, {
+    ...init,
+    headers: {
+      'Cache-Control': 'no-store',
+      ...init?.headers,
+    },
+  })
+}
+
+function hasValidWriteAuth(req: NextRequest): boolean {
+  const token = process.env.BOARD_API_TOKEN
+  if (token) {
+    const bearer = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
+    return bearer === token || req.headers.get('x-board-api-token') === token
+  }
+
+  const origin = req.headers.get('origin')
+  if (!origin) return true
+
+  const expected = new URL(req.url).origin
+  return origin === expected
+}
+
+async function readJsonBody(req: NextRequest): Promise<Record<string, unknown> | NextResponse> {
+  const contentType = req.headers.get('content-type') ?? ''
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return safeJson({ error: 'content-type must be application/json' }, { status: 415 })
+  }
+
+  const contentLength = Number(req.headers.get('content-length') ?? 0)
+  if (contentLength > MAX_REQUEST_BYTES) {
+    return safeJson({ error: 'request too large' }, { status: 413 })
+  }
+
+  const raw = await req.text()
+  if (raw.length > MAX_REQUEST_BYTES) {
+    return safeJson({ error: 'request too large' }, { status: 413 })
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return safeJson({ error: 'invalid JSON body' }, { status: 400 })
+    }
+    return parsed as Record<string, unknown>
+  } catch {
+    return safeJson({ error: 'invalid JSON' }, { status: 400 })
+  }
+}
+
+function parseBlockRecord(raw: string): BlockRecord | null {
+  if (raw.length > MAX_RECORD_BYTES) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object') return null
+    const record = parsed as BlockRecord
+    if (!isValidId(record.id)) return null
+    if (record.bbox !== undefined && !isValidBBox(record.bbox)) return null
+    return record
+  } catch {
+    return null
+  }
 }
 
 // ─── POST /api/board ──────────────────────────────────────────────────────────
@@ -67,16 +170,19 @@ function isValidBBox(b: unknown): b is BBox {
 // Batched update: { session, updates:[{id, bbox}] }
 // Writes geometry back to Redis (read-modify-write to preserve all other fields).
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: Record<string, unknown>
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'invalid JSON' }, { status: 400 })
+  if (!hasValidWriteAuth(req)) {
+    return safeJson({ error: 'forbidden' }, { status: 403 })
   }
+
+  const parsed = await readJsonBody(req)
+  if (parsed instanceof NextResponse) {
+    return parsed
+  }
+  const body = parsed
 
   const { session } = body
   if (!isValidSession(session)) {
-    return NextResponse.json({ error: 'invalid session' }, { status: 400 })
+    return safeJson({ error: 'invalid session' }, { status: 400 })
   }
 
   // Normalise single-update into the batched form.
@@ -86,12 +192,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } else if (body.id !== undefined && body.bbox !== undefined) {
     updates = [{ id: body.id as string, bbox: body.bbox as BBox }]
   } else {
-    return NextResponse.json({ error: 'missing id/bbox or updates array' }, { status: 400 })
+    return safeJson({ error: 'missing id/bbox or updates array' }, { status: 400 })
   }
 
   // Cap batch size to prevent a single request from flooding Redis.
-  if (updates.length > MAX_UPDATES_PER_REQUEST) {
-    return NextResponse.json({ error: 'too many updates' }, { status: 400 })
+  if (updates.length === 0 || updates.length > MAX_UPDATES_PER_REQUEST) {
+    return safeJson({ error: 'invalid update count' }, { status: 400 })
   }
 
   // Validate each update entry.
@@ -99,36 +205,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // attacker-controlled strings back in the response.
   for (const u of updates) {
     if (!isValidId(u.id)) {
-      return NextResponse.json({ error: 'invalid id in updates' }, { status: 400 })
+      return safeJson({ error: 'invalid id in updates' }, { status: 400 })
     }
     if (!isValidBBox(u.bbox)) {
-      return NextResponse.json({ error: 'invalid bbox in updates' }, { status: 400 })
+      return safeJson({ error: 'invalid bbox in updates' }, { status: 400 })
     }
   }
 
   try {
     const redis = getRedis()
-    // Process each update: read-modify-write to preserve all existing block fields.
+    // Process each update atomically to preserve all existing block fields.
     await Promise.all(
       updates.map(async ({ id, bbox }) => {
         const key = blockKey(session as string, id)
-        const existing = await redis.get(key)
-        let record: BlockRecord = existing ? (JSON.parse(existing) as BlockRecord) : { id }
-        record = {
-          ...record,
-          bbox,
-          updatedAt: new Date().toISOString(),
-        }
-        await redis.set(key, JSON.stringify(record))
+        const updated = await redis.eval(
+          GEOMETRY_UPDATE_SCRIPT,
+          1,
+          key,
+          id,
+          String(bbox.x),
+          String(bbox.y),
+          String(bbox.w),
+          String(bbox.h),
+          new Date().toISOString(),
+        )
         // Ensure the id is in the session index (idempotent).
-        await redis.sadd(indexKey(session as string), id)
+        if (updated === 1) {
+          await redis.sadd(indexKey(session as string), id)
+        }
       }),
     )
-    return NextResponse.json({ ok: true })
+    return safeJson({ ok: true })
   } catch (err) {
     // Never leak the Redis URL or stack; return a safe 503.
     console.error('[board/route] POST failed:', (err as Error).message)
-    return NextResponse.json({ error: 'storage unavailable' }, { status: 503 })
+    return safeJson({ error: 'storage unavailable' }, { status: 503 })
   }
 }
 
@@ -140,14 +251,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const session = searchParams.get('session')
 
   if (!isValidSession(session)) {
-    return NextResponse.json({ error: 'invalid session' }, { status: 400 })
+    return safeJson({ error: 'invalid session' }, { status: 400 })
   }
 
   try {
     const redis = getRedis()
-    const ids = await redis.smembers(indexKey(session))
+    const ids = (await redis.smembers(indexKey(session)))
+      .filter(isValidId)
+      .slice(0, MAX_BLOCKS_PER_RESPONSE)
     if (ids.length === 0) {
-      return NextResponse.json({ blocks: [] })
+      return safeJson({ blocks: [] })
     }
 
     // Fetch all block records in one pipeline pass.
@@ -156,22 +269,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       pipeline.get(blockKey(session, id))
     }
     const results = await pipeline.exec()
-    if (!results) return NextResponse.json({ blocks: [] })
+    if (!results) return safeJson({ blocks: [] })
 
     const blocks: BlockRecord[] = []
     for (const [err, raw] of results) {
       if (err || !raw) continue
-      try {
-        blocks.push(JSON.parse(raw as string) as BlockRecord)
-      } catch {
+      const record = parseBlockRecord(raw as string)
+      if (record) {
+        blocks.push(record)
+      } else {
         // Corrupt entry — skip silently.
       }
     }
 
-    return NextResponse.json({ blocks })
+    return safeJson({ blocks })
   } catch (err) {
     // Return empty snapshot so the board still loads; don't expose details.
     console.error('[board/route] GET failed:', (err as Error).message)
-    return NextResponse.json({ blocks: [] })
+    return safeJson({ blocks: [] })
   }
 }

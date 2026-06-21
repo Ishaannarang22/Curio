@@ -7,7 +7,7 @@ import {
   T,
   TLBaseShape,
 } from '@tldraw/tldraw'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export type ImageNodeShape = TLBaseShape<
   'image-node',
@@ -69,9 +69,13 @@ function CrossFadeImage({
   }, [url])
 
   return (
+    // Remote/generated image URLs are command-driven, so next/image cannot know
+    // their origins without a server-side proxy or allowlist.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
       alt="Generated"
+      referrerPolicy="no-referrer"
       style={{
         width: w,
         height: h,

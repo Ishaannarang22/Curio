@@ -105,6 +105,7 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 import httpx
@@ -146,6 +147,7 @@ from board_writer import BoardWriter
 _AGENT_DIR = Path(__file__).resolve().parent
 load_dotenv(_AGENT_DIR / ".env")
 load_dotenv(_AGENT_DIR.parent / ".env.local")
+_MAX_OFFER_BODY_BYTES = 256 * 1024
 
 
 # -----------------------------------------------------------------------------
@@ -271,7 +273,7 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
 
     if gateway_key:
-        model = payload_model or os.getenv("AI_GATEWAY_MODEL") or "openai/gpt-4o-mini"
+        model = _allowed_model(payload_model, os.getenv("AI_GATEWAY_MODEL") or "openai/gpt-4o-mini")
         base_url = "https://ai-gateway.vercel.sh/v1"
         api_key = gateway_key
         logger.info(f"LLM: Vercel AI Gateway, model={model}")
@@ -298,6 +300,29 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
         base_url=base_url,
         settings=OpenAILLMService.Settings(model=model, extra=extra),
     )
+
+
+def _allowed_model(requested_model: str | None, default_model: str) -> str:
+    allowed = {
+        m.strip()
+        for m in os.getenv("ALLOWED_LLM_MODELS", default_model).split(",")
+        if m.strip()
+    }
+    if requested_model and requested_model in allowed:
+        return requested_model
+    if requested_model and requested_model not in allowed:
+        logger.warning(f"Rejected unapproved model from session payload: {requested_model!r}")
+    return default_model
+
+
+def _is_allowed_supabase_url(url: str) -> bool:
+    configured = os.getenv("SUPABASE_URL")
+    if configured:
+        return url.rstrip("/") == configured.rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    return parsed.hostname is not None and parsed.hostname.endswith(".supabase.co")
 
 
 # -----------------------------------------------------------------------------
@@ -338,7 +363,7 @@ async def bot(runner_args: RunnerArguments):
     if all(
         session_ctx.get(k)
         for k in ("conversationId", "accessToken", "supabaseUrl", "supabaseAnonKey")
-    ):
+    ) and _is_allowed_supabase_url(str(session_ctx["supabaseUrl"])):
         store = MessageStore(
             supabase_url=session_ctx["supabaseUrl"],
             anon_key=session_ctx["supabaseAnonKey"],
@@ -528,6 +553,17 @@ class _OfferBodyCompat:
             while more:
                 message = await receive()
                 body += message.get("body", b"")
+                if len(body) > _MAX_OFFER_BODY_BYTES:
+                    await send({
+                        "type": "http.response.start",
+                        "status": 413,
+                        "headers": [(b"content-type", b"text/plain")],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": b"Request too large",
+                    })
+                    return
                 more = message.get("more_body", False)
             try:
                 data = json.loads(body or b"{}")
