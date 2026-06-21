@@ -271,10 +271,13 @@ class BoardState:
             sentry_sdk.capture_exception(exc)
 
     async def update_geometry(self, block_id: str, bbox: dict[str, float]) -> None:
-        """Merge real post-layout geometry into an existing block (write-back path).
+        """Merge real post-layout geometry into a block's stored bbox (write-back path).
 
-        Called by M4 when tldraw reports actual shape positions after ELK layout.
-        Silently does nothing if the block doesn't exist yet.
+        Called when tldraw reports actual rendered shape geometry after layout.
+        This is the path that lets resolve_placement() reserve a block's REAL size
+        instead of the hardcoded guess. If the block has no record yet (e.g. an
+        agent-created shape whose id the browser reports first), create a minimal
+        record so the real geometry is still persisted and addressable by id.
         """
         client = self._client_or_none()
         if client is None:
@@ -283,12 +286,19 @@ class BoardState:
             validate_key_part(block_id, "block_id")
             raw = await client.get(_block_key(self._session, block_id))
             if raw is None:
-                logger.debug(f"BoardState.update_geometry: block {block_id!r} not found, skipping")
-                return
-            rec: dict[str, Any] = json.loads(raw)
-            rec["bbox"] = bbox
+                rec: dict[str, Any] = {"id": block_id}
+            else:
+                rec = json.loads(raw)
+            # Merge real {x,y,w,h} into the existing bbox so partial reports still
+            # leave the other dimensions intact.
+            merged = dict(rec.get("bbox") or {})
+            merged.update(bbox)
+            rec["bbox"] = merged
             rec["updatedAt"] = time.time()
-            await client.set(_block_key(self._session, block_id), json.dumps(rec))
+            pipe = client.pipeline()
+            pipe.set(_block_key(self._session, block_id), json.dumps(rec))
+            pipe.sadd(_index_key(self._session), block_id)
+            await pipe.execute()
         except Exception as exc:
             logger.error(f"BoardState.update_geometry failed: {exc}")
             sentry_sdk.capture_exception(exc)
@@ -467,10 +477,18 @@ class InMemoryBoardState:
         self._blocks.pop(block_id, None)
 
     async def update_geometry(self, block_id: str, bbox: dict[str, float]) -> None:
+        if not isinstance(block_id, str) or not block_id:
+            return
+        # Create-minimal for an unknown id so real geometry is still recorded;
+        # merge into the existing bbox so partial reports keep other dimensions.
         rec = self._blocks.get(block_id)
-        if rec is not None:
-            rec["bbox"] = bbox
-            rec["updatedAt"] = time.time()
+        if rec is None:
+            rec = {"id": block_id, "bbox": {}}
+            self._blocks[block_id] = rec
+        merged = dict(rec.get("bbox") or {})
+        merged.update(bbox)
+        rec["bbox"] = merged
+        rec["updatedAt"] = time.time()
 
     async def get_topic_blocks(self, topic_id: str) -> list[dict[str, Any]]:
         return [dict(r) for r in self._blocks.values() if r.get("topicId") == topic_id]

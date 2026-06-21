@@ -6,6 +6,7 @@ import {
 } from '@tldraw/tldraw'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { shapeSupportsProp } from './safeShapeWrites'
+import { seedPosition, resetLayoutState } from './layoutGuard'
 import { sanitizeMarkdown } from '../editor/markdown'
 import {
   forceSimulation,
@@ -61,7 +62,7 @@ export function addNote(
   internalId?: string
 ) {
   const tlId = createShapeId()
-  const pos = position ?? randomPosition(editor)
+  const pos = seedPosition(editor, 200, 200, position)
   // Register in idMap if a semantic id was provided (add_sticky path).
   if (internalId) {
     const existing = getTLId(internalId)
@@ -84,12 +85,11 @@ export function addNote(
   scheduleAppearAnimation(editor, tlId)
 }
 
+// Non-overlapping birth position. The layout guard probes existing block bounds
+// and returns a free spot for a default-sized block; callers with a known size
+// and an agent-proposed position should use seedPosition directly (below).
 function randomPosition(editor: Editor) {
-  const vp = editor.getViewportPageBounds()
-  return {
-    x: vp.x + vp.w * 0.2 + Math.random() * vp.w * 0.6,
-    y: vp.y + vp.h * 0.2 + Math.random() * vp.h * 0.6,
-  }
+  return seedPosition(editor, 320, 240)
 }
 
 // ─── addExplanation ────────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ export function addExplanation(
   position?: { x: number; y: number }
 ) {
   let tlId = getTLId(internalId)
-  const pos = position ?? randomPosition(editor)
+  const pos = seedPosition(editor, 300, 180, position)
 
   if (tlId && editor.getShape(tlId)) {
     editor.updateShape({
@@ -203,7 +203,7 @@ export function addMarkdown(
     }
   }
 
-  const anchor = options?.position ?? randomPosition(editor)
+  const anchor = seedPosition(editor, w, 200, options?.position)
   const id = createShapeId()
   setTLId(key, id)
   editor.createShape({
@@ -237,7 +237,7 @@ export function addFlowNode(
 
   tlId = createShapeId()
   setTLId(internalId, tlId)
-  const pos = position ?? randomPosition(editor)
+  const pos = seedPosition(editor, 180, subtitle ? 80 : 60, position)
 
   editor.createShape({
     id: tlId,
@@ -265,7 +265,7 @@ export function addMindMapNode(
 
   tlId = createShapeId()
   setTLId(internalId, tlId)
-  const pos = position ?? randomPosition(editor)
+  const pos = seedPosition(editor, 140, 44, position)
 
   editor.createShape({
     id: tlId,
@@ -373,7 +373,7 @@ export function requestImage(
   position?: { x: number; y: number }
 ) {
   let tlId = getTLId(internalId)
-  const pos = position ?? randomPosition(editor)
+  const pos = seedPosition(editor, 300, 220, position)
 
   if (tlId && editor.getShape(tlId)) {
     editor.updateShape({
@@ -452,6 +452,7 @@ export function clearBoard(editor: Editor) {
   const allIds = editor.getCurrentPageShapeIds()
   editor.deleteShapes([...allIds])
   idMap.clear()
+  resetLayoutState()
 }
 
 // ─── addMindMap ───────────────────────────────────────────────────────────────

@@ -53,18 +53,23 @@ const MAX_RECORD_BYTES = 128 * 1024
 const MAX_ABS_COORDINATE = 1_000_000
 const MAX_DIMENSION = 100_000
 
+// Read-modify-write the BlockRecord's real geometry. If the block key does not
+// exist yet (e.g. an agent-created shape whose tldraw id the browser is the first
+// to report), create a minimal record { id, bbox, updatedAt } so the real
+// dimensions are still persisted for the agent's placement logic to read.
 const GEOMETRY_UPDATE_SCRIPT = `
 local key = KEYS[1]
 local existing = redis.call("GET", key)
-if not existing then
-  return 0
-end
 local record
-local ok, decoded = pcall(cjson.decode, existing)
-if ok and type(decoded) == "table" then
-  record = decoded
+if existing then
+  local ok, decoded = pcall(cjson.decode, existing)
+  if ok and type(decoded) == "table" then
+    record = decoded
+  else
+    record = {}
+  end
 else
-  return 0
+  record = {}
 end
 record["id"] = record["id"] or ARGV[1]
 record["bbox"] = {
