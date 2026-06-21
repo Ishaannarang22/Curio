@@ -8,6 +8,7 @@ import {
   TLBaseShape,
 } from '@tldraw/tldraw'
 import { useEffect, useRef, useState } from 'react'
+import { IconExplanation } from '../components/icons'
 
 export type ExplanationCardShape = TLBaseShape<
   'explanation-card',
@@ -101,26 +102,12 @@ export class ExplanationCardUtil extends BaseBoxShapeUtil<ExplanationCardShape> 
         id={shape.id}
         style={{ width: '100%', height: '100%', pointerEvents: 'all' }}
       >
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            borderRadius: 14,
-            background: 'linear-gradient(135deg, #0f766e, #14b8a6)',
-            color: '#fff',
-            padding: '14px 16px',
-            boxShadow: highlighted
-              ? '0 0 0 3px #fff, 0 0 0 6px #14b8a6, 0 4px 20px rgba(20,184,166,0.5)'
-              : '0 3px 12px rgba(15,118,110,0.35)',
-            transition: 'box-shadow 0.3s ease',
-            overflow: 'hidden',
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontSize: 13,
-            lineHeight: 1.5,
-            userSelect: 'none',
-          }}
-        >
-          <ul style={{ listStyle: 'disc', padding: 0, margin: 0 }}>
+        <div className={'curio-explain' + (highlighted ? ' is-highlighted' : '')}>
+          <div className="curio-explain__eyebrow">
+            <IconExplanation />
+            Explanation
+          </div>
+          <ul className="curio-explain__body">
             <TypewriterContent text={text} revealedLength={revealedLength} />
           </ul>
         </div>

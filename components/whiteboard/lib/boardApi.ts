@@ -278,7 +278,10 @@ export function connectNodes(
   editor: Editor,
   fromId: string,
   toId: string,
-  label?: string
+  label?: string,
+  // Mind-map links are plain lines; flowchart links get a subtle arrowhead at
+  // the destination to show direction.
+  directed = false
 ) {
   const fromTl = getTLId(fromId)
   const toTl = getTLId(toId)
@@ -306,6 +309,8 @@ export function connectNodes(
       text: label ?? '',
       color: 'grey',
       size: 's',
+      arrowheadStart: 'none',
+      arrowheadEnd: directed ? 'arrow' : 'none',
     },
   })
 
@@ -578,9 +583,9 @@ export async function addFlowchart(
       }
     }
 
-    // Connect sequentially
+    // Connect sequentially — flowchart edges are directional.
     for (let i = 0; i < steps.length - 1; i++) {
-      connectNodes(editor, steps[i].id, steps[i + 1].id)
+      connectNodes(editor, steps[i].id, steps[i + 1].id, undefined, true)
     }
   })
 

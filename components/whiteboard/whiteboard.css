@@ -4,32 +4,367 @@
    html/body/#root viewport resets from the Vite app are no longer needed and
    would leak into other Next routes. */
 
-/* Shape appear animation — fade + slight scale-in.
-   IMPORTANT: this must NOT be applied to `.tl-shape`. tldraw positions every
-   shape with `transform: translate(x,y)` on `.tl-shape`; animating `transform`
-   there (even just scale) clobbers the translate and snaps the shape to the
-   page origin. We apply it to `.tl-html-container`, a child element that
-   carries no positioning transform, so scaling is safe. */
-@keyframes shape-appear {
-  from {
-    opacity: 0;
-    transform: scale(0.88);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+/* ─── Design tokens ──────────────────────────────────────────────────────────
+   Spacing scale: 4 / 8 / 12 / 16 / 24 / 32 — used everywhere, no ad-hoc values.
+   Type scale: xs / sm / base / md / lg. Each node family carries a tint (bg),
+   a border, a darker title, and a slightly lighter subtitle of the same hue —
+   all title-on-tint pairings verified to meet WCAG AA. The accent is reserved
+   for exactly two things: the active tool and the selection outline. */
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  --fs-xs: 11px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --border: 1px;
+
+  --ink: #16181d;          /* primary text on white */
+  --muted: #6b7280;        /* secondary / icon idle */
+  --hairline: #e5e7eb;     /* thin separators / idle borders */
+  --canvas: #ffffff;
+
+  /* The one accent — active tool + selection only. Appears nowhere else. */
+  --accent: #111827;
+
+  /* Purple — mind map */
+  --purple-tint: #f5f3ff;
+  --purple-border: #c4b5fd;
+  --purple-title: #6d28d9;
+  --purple-subtitle: #8b5cf6;
+  /* Blue — flow */
+  --blue-tint: #eff6ff;
+  --blue-border: #93c5fd;
+  --blue-title: #1d4ed8;
+  --blue-subtitle: #3b82f6;
+  /* Teal — explanation */
+  --teal-tint: #f0fdfa;
+  --teal-border: #5eead4;
+  --teal-title: #0f766e;
+  --teal-subtitle: #0d9488;
+  /* Pink — image */
+  --pink-tint: #fdf2f8;
+  --pink-border: #f9a8d4;
+  --pink-title: #be185d;
+  --pink-subtitle: #db2777;
 }
 
-/* Shimmer animation for ImageNode loading state */
+/* ─── tldraw canvas: pure white, no grid, accent selection ───────────────────
+   Override tldraw's theme variables. Grid is off by default; we also force the
+   canvas background to solid white and recolor the selection outline/fill to the
+   single accent so it reads as a thin intentional ring, not a heavy blue glow. */
+.tl-container {
+  --color-background: var(--canvas);
+  --color-selected: var(--accent);
+  --color-selection-stroke: var(--accent);
+  --color-selection-fill: rgba(17, 24, 39, 0.04);
+}
+.tl-background {
+  background-color: var(--canvas) !important;
+}
+/* Thin, consistent selection indicator. */
+.tl-selection__fg__outline {
+  stroke-width: 1.5px !important;
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────────────*/
+@keyframes shape-appear {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
+  0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
-/* Apply appear animation to the custom-shape content containers only. */
+/* Apply the appear animation to custom-shape content containers only (never
+   `.tl-shape`, whose transform tldraw owns for positioning). */
 .tl-html-container {
-  animation: shape-appear 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: shape-appear 0.2s ease both;
+}
+
+/* ─── Nodes — shared system ──────────────────────────────────────────────────
+   Every node: light tint bg, 1px matching border, family-colored text, a leading
+   type icon, and the same radius/padding/type scale. No shadows anywhere. */
+.curio-node {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--node-tint);
+  border: var(--border) solid var(--node-border);
+  border-radius: var(--radius);
+  font-family: 'Inter', system-ui, sans-serif;
+  user-select: none;
+  transition: outline-color 0.2s ease, border-color 0.2s ease;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.curio-node__icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--node-title);
+}
+.curio-node__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  text-align: left;
+}
+.curio-node__title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--node-title);
+}
+.curio-node__subtitle {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--node-subtitle);
+}
+/* Highlight pulse: a thin accent-of-the-family ring via outline (no shadow,
+   no layout shift). */
+.curio-node.is-highlighted {
+  outline-color: var(--node-title);
+  border-color: var(--node-title);
+}
+
+/* Family tints */
+.curio-node--purple { --node-tint: var(--purple-tint); --node-border: var(--purple-border); --node-title: var(--purple-title); --node-subtitle: var(--purple-subtitle); }
+.curio-node--blue   { --node-tint: var(--blue-tint);   --node-border: var(--blue-border);   --node-title: var(--blue-title);   --node-subtitle: var(--blue-subtitle); }
+.curio-node--teal   { --node-tint: var(--teal-tint);   --node-border: var(--teal-border);   --node-title: var(--teal-title);   --node-subtitle: var(--teal-subtitle); }
+.curio-node--pink   { --node-tint: var(--pink-tint);   --node-border: var(--pink-border);   --node-title: var(--pink-title);   --node-subtitle: var(--pink-subtitle); }
+
+/* Mind-map nodes are pills; the center node reads one step stronger. */
+.curio-node--pill {
+  border-radius: var(--radius-pill);
+  justify-content: center;
+  padding: var(--sp-2) var(--sp-4);
+}
+.curio-node--pill .curio-node__body { text-align: center; }
+.curio-node--center .curio-node__title { font-size: var(--fs-md); font-weight: 700; }
+
+/* ─── Explanation card (teal) — typewriter markdown body ─────────────────────*/
+.curio-explain {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  background: var(--teal-tint);
+  border: var(--border) solid var(--teal-border);
+  border-radius: var(--radius);
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 0.2s ease, border-color 0.2s ease;
+}
+.curio-explain.is-highlighted { outline-color: var(--teal-title); border-color: var(--teal-title); }
+.curio-explain__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--teal-title);
+}
+.curio-explain__eyebrow svg { width: 16px; height: 16px; }
+.curio-explain__body {
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: #134e4a;            /* teal-900 on teal-50 — AA */
+  list-style: disc;
+  margin: 0;
+  padding-left: var(--sp-4);
+}
+.curio-explain__body p { margin: 0 0 var(--sp-1); }
+.curio-explain__body strong { color: var(--teal-title); font-weight: 700; }
+
+/* ─── Image node (pink frame) ────────────────────────────────────────────────*/
+.curio-image {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  padding: var(--sp-1);
+  background: var(--pink-tint);
+  border: var(--border) solid var(--pink-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 0.2s ease, border-color 0.2s ease;
+}
+.curio-image.is-highlighted { outline-color: var(--pink-title); border-color: var(--pink-title); }
+.curio-image__media { width: 100%; height: 100%; border-radius: var(--radius-sm); display: block; object-fit: cover; }
+.curio-image__shimmer {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--pink-tint) 25%, #fce7f3 50%, var(--pink-tint) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  color: var(--pink-subtitle);
+}
+.curio-image__chip {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  right: var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: rgba(255, 255, 255, 0.9);
+  border: var(--border) solid var(--pink-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--pink-title);
+  backdrop-filter: blur(4px);
+}
+.curio-image__chip svg { width: 13px; height: 13px; flex-shrink: 0; }
+.curio-image__chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Floating toolbar (pill, thin border, no shadow) ────────────────────────*/
+.curio-toolbar {
+  position: absolute;
+  bottom: var(--sp-6);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--canvas);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius-pill);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.curio-toolbar__group { display: flex; align-items: center; gap: 2px; }
+.curio-toolbar__divider { width: 1px; height: 22px; background: var(--hairline); margin: 0 var(--sp-1); }
+
+.curio-tool {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.curio-tool:hover { background: #f3f4f6; color: var(--ink); }
+.curio-tool:disabled { opacity: 0.35; cursor: default; }
+.curio-tool:disabled:hover { background: transparent; color: var(--muted); }
+.curio-tool.is-active { background: var(--accent); color: #fff; }
+.curio-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.curio-tool svg { width: 18px; height: 18px; }
+
+.curio-zoom { display: flex; align-items: center; gap: 2px; }
+.curio-zoom__pct {
+  min-width: 44px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
+}
+.curio-zoom__pct:hover { color: var(--ink); background: #f3f4f6; }
+.curio-zoom__pct:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Tooltip: tool name + shortcut, on hover/focus. */
+.curio-tool[data-tip]::after,
+.curio-tool[data-tip]::before {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.curio-tool[data-tip]::after {
+  content: attr(data-tip);
+  white-space: nowrap;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+.curio-tool[data-tip]:hover::after,
+.curio-tool[data-tip]:focus-visible::after { opacity: 1; }
+.curio-tool[data-tip][data-kbd]::after { content: attr(data-tip) '  ·  ' attr(data-kbd); }
+
+/* ─── Empty canvas state ─────────────────────────────────────────────────────*/
+.curio-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  pointer-events: none;
+  color: var(--muted);
+  text-align: center;
+}
+.curio-empty__mark {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius-pill);
+  color: #c4c8d0;
+}
+.curio-empty__title { font-size: var(--fs-lg); font-weight: 600; color: #9aa0aa; }
+.curio-empty__hint { font-size: var(--fs-sm); color: #b4b8c0; }
+
+/* ─── Reduced motion ─────────────────────────────────────────────────────────*/
+@media (prefers-reduced-motion: reduce) {
+  .tl-html-container { animation: none; }
+  .curio-image__shimmer { animation: none; }
+  * { transition-duration: 0.01ms !important; }
 }
 
 /* ─── Markdown doc (markdown-doc shape) — Notion-style WYSIWYG ───────────────
@@ -208,20 +543,3 @@
 }
 .curio-bubble button:hover { background: rgba(255, 255, 255, 0.12); }
 .curio-bubble button.is-active { background: rgba(255, 255, 255, 0.2); color: #fff; }
-
-/* Override tldraw toolbar styles to feel minimal */
-.tlui-toolbar {
-  background: rgba(15, 23, 42, 0.88) !important;
-  backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 12px !important;
-}
-
-/* Keep tldraw UI buttons readable */
-.tlui-button {
-  color: #cbd5e1 !important;
-}
-
-.tlui-button:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
-}
