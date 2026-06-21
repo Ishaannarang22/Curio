@@ -13,9 +13,14 @@
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Keep the SSE stream open as long as the platform allows; EventSource
+// auto-reconnects after the cap.
+export const maxDuration = 300
 
 import { NextRequest } from 'next/server'
-import { addController, removeController } from '../_registry'
+import { addController } from '../_registry'
+import { channelFor, createSubscriber, redisEnabled } from '../redisBus'
+import type Redis from 'ioredis'
 
 const HEARTBEAT_MS = 15_000
 
@@ -26,40 +31,63 @@ export async function GET(req: NextRequest) {
   const encoder = new TextEncoder()
 
   let heartbeatId: ReturnType<typeof setInterval> | null = null
+  let subscriber: Redis | null = null
+
+  const cleanup = () => {
+    if (heartbeatId) clearInterval(heartbeatId)
+    heartbeatId = null
+    if (subscriber) {
+      subscriber.quit().catch(() => subscriber?.disconnect())
+      subscriber = null
+    }
+  }
 
   const stream = new ReadableStream<Uint8Array>({
-    start(ctrl) {
-      // Register this subscriber.
-      addController(session, ctrl)
-
+    async start(ctrl) {
       // Initial SSE comment so the browser knows the connection is live.
       ctrl.enqueue(encoder.encode(`: connected session=${session}\n\n`))
 
-      // Periodic heartbeat to keep the connection alive.
+      if (redisEnabled()) {
+        // Cross-instance transport: subscribe to this session's Redis channel
+        // and forward every published command to the browser.
+        subscriber = createSubscriber()
+        if (subscriber) {
+          subscriber.on('message', (_channel, message) => {
+            try {
+              ctrl.enqueue(encoder.encode(`data: ${message}\n\n`))
+            } catch {
+              cleanup()
+            }
+          })
+          try {
+            await subscriber.subscribe(channelFor(session))
+          } catch (err) {
+            console.error('[board/stream] subscribe failed:', (err as Error).message)
+          }
+        }
+      } else {
+        // Pure-local dev fallback: same-process in-memory registry.
+        addController(session, ctrl)
+      }
+
+      // Periodic heartbeat to keep the connection alive through proxies.
       heartbeatId = setInterval(() => {
         try {
           ctrl.enqueue(encoder.encode(`: heartbeat\n\n`))
         } catch {
-          // Stream already closed.
-          if (heartbeatId) clearInterval(heartbeatId)
+          cleanup()
         }
       }, HEARTBEAT_MS)
     },
 
     cancel() {
-      // Browser closed/navigated away — clean up.
-      if (heartbeatId) clearInterval(heartbeatId)
-      // We don't have a reference to ctrl here, but the registry cleans up
-      // stale controllers on the next broadcast attempt. Explicitly remove
-      // by re-deriving: Next.js closes the stream, so any enqueue will throw,
-      // and broadcast() already handles that by deleting the controller.
+      // Browser closed/navigated away — release the Redis subscriber.
+      cleanup()
     },
   })
 
   // Also clean up on request abort (navigation, refresh).
-  req.signal.addEventListener('abort', () => {
-    if (heartbeatId) clearInterval(heartbeatId)
-  })
+  req.signal.addEventListener('abort', cleanup)
 
   return new Response(stream, {
     headers: {

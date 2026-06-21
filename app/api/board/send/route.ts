@@ -17,6 +17,7 @@ export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { broadcast } from '../_registry'
+import { publishCommand, redisEnabled } from '../redisBus'
 import { createServiceClient } from '@/lib/supabase/admin'
 import type { Json } from '@/lib/supabase/types'
 
@@ -186,7 +187,19 @@ export async function POST(req: NextRequest) {
 
   const sessionKey = isValidSession(session) ? session : 'default'
 
-  const sent = broadcast(sessionKey, { action, payload: payload as Record<string, unknown> })
+  // Fan out via Redis Pub/Sub (works across Vercel instances). Fall back to the
+  // in-memory registry only when Redis isn't configured (pure-local dev).
+  const cmd = { action, payload: payload as Record<string, unknown> }
+  let sent = 0
+  if (redisEnabled()) {
+    try {
+      sent = await publishCommand(sessionKey, cmd)
+    } catch (err) {
+      console.error('[board/send] redis publish failed:', (err as Error).message)
+    }
+  } else {
+    sent = broadcast(sessionKey, cmd)
+  }
   console.log(`[board/send] session=${sessionKey} action=${action} subscribers=${sent}`)
 
   // Durable agent-write flush — best-effort, never blocks/breaks the broadcast.

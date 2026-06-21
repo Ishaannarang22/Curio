@@ -15,7 +15,15 @@ function getRedis(): Redis {
     // Still construct a client — it will fail at connect time and be handled below.
     _redis = new Redis({ lazyConnect: true, enableOfflineQueue: false, maxRetriesPerRequest: 1 })
   } else {
-    _redis = new Redis(url, { maxRetriesPerRequest: 1, enableOfflineQueue: false })
+    // family:4 avoids broken-IPv6 resolution; enableOfflineQueue lets the first
+    // command on a cold serverless instance wait for connect instead of failing
+    // with a 503. connectTimeout bounds the wait.
+    _redis = new Redis(url, {
+      family: 4,
+      enableOfflineQueue: true,
+      maxRetriesPerRequest: 2,
+      connectTimeout: 10_000,
+    })
   }
   _redis.on('error', (err) => {
     // Log the error class but never the URL (which may contain credentials).
