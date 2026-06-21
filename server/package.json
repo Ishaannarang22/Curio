@@ -1,0 +1,28 @@
+{
+  "name": "curio-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Redis-backed real-time sync layer for the Curio whiteboard (agent-agnostic).",
+  "scripts": {
+    "redis:up": "docker compose up -d",
+    "redis:down": "docker compose down",
+    "relay:dev": "tsx watch src/relay.ts",
+    "relay": "tsx src/relay.ts",
+    "simulate": "tsx src/simulate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.5.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

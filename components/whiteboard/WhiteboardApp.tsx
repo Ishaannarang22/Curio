@@ -21,10 +21,21 @@ import { setEditor, connectWebSocket } from './lib/commandQueue'
 
 const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil, MarkdownDocUtil]
 
+// Choose the live source. Default: the legacy mock-server on :8080. When a
+// ?session=<id> query param is present, connect to the Redis relay instead at
+// ws://localhost:8090/<id>, so board state is persisted/synced through Redis
+// (see /server). Override the relay base with NEXT_PUBLIC_RELAY_URL.
+function resolveBoardSocketUrl(): string {
+  const session = new URLSearchParams(window.location.search).get('session')
+  if (!session) return 'ws://localhost:8080'
+  const base = process.env.NEXT_PUBLIC_RELAY_URL ?? 'ws://localhost:8090'
+  return `${base}/${encodeURIComponent(session)}`
+}
+
 export function WhiteboardApp() {
   const handleMount = useCallback((editor: Editor) => {
     setEditor(editor)
-    connectWebSocket('ws://localhost:8080')
+    connectWebSocket(resolveBoardSocketUrl())
     editor.updateInstanceState({ isDebugMode: false })
   }, [])
 
