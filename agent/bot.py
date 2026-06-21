@@ -138,6 +138,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.workers.runner import WorkerRunner
 
 import tuning
+from board_writer import BoardWriter
 
 # Load env from agent/.env (optional) AND the repo root .env.local, so the
 # keys already configured for the Next.js app (DEEPGRAM_API_KEY,
@@ -426,10 +427,18 @@ async def bot(runner_args: RunnerArguments):
         ),
     )
 
+    # --- Caller channel: the board-writing brain (dual-channel design).
+    # A pass-through observer of final transcripts. Its own isolated brain +
+    # context; fire-and-forget so it never blocks the speaking path. Writes a
+    # living Markdown doc to the tldraw whiteboard via the mock-server bridge.
+    # Self-disables (voice runs untouched) when no caller key / board bridge.
+    board_writer = BoardWriter()
+
     pipeline = Pipeline(
         [
             transport.input(),  # browser mic audio (SmallWebRTC)
             stt,  # Deepgram Flux: STT + end-of-turn
+            board_writer,  # CALLER channel: mirror speech -> whiteboard (observer)
             ctx_aggregators.user(),  # user turn -> context (+ turn controller)
             llm,  # OpenAI-compatible chat completion
             tts,  # Cartesia speech synthesis
@@ -487,6 +496,7 @@ async def bot(runner_args: RunnerArguments):
         sentry_sdk.capture_exception(e)
         raise
     finally:
+        await board_writer.close()
         if store:
             await store.close()
 
