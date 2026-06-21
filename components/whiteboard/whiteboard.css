@@ -4,6 +4,11 @@
    html/body/#root viewport resets from the Vite app are no longer needed and
    would leak into other Next routes. */
 
+/* Hide the "made with tldraw" watermark in the bottom-right corner. */
+.tl-watermark_SEE-LICENSE {
+  display: none !important;
+}
+
 /* ─── Design tokens ──────────────────────────────────────────────────────────
    Spacing scale: 4 / 8 / 12 / 16 / 24 / 32 — used everywhere, no ad-hoc values.
    Type scale: xs / sm / base / md / lg. Each node family carries a tint (bg),
