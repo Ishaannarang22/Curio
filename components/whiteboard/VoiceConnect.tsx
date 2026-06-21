@@ -34,6 +34,9 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const clientRef = useRef<PipecatClient | null>(null)
+  // Bot (TTS) audio is NOT auto-played by the SDK — we must attach the bot's
+  // incoming audio track to an <audio> element ourselves, or you hear nothing.
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const agentBase =
     process.env.NEXT_PUBLIC_VOICE_AGENT_URL?.replace(/\/$/, '') ?? 'http://localhost:7860'
@@ -68,6 +71,17 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
           onBotReady: () => {
             console.log('[VoiceConnect] Bot ready — live!')
             setStatus('live')
+          },
+          // Play the bot's TTS audio. onTrackStarted fires for every track;
+          // skip the local mic track and route the remote audio into our
+          // hidden <audio> element so the user actually hears the agent.
+          onTrackStarted: (track, participant) => {
+            if (participant?.local) return
+            if (track.kind !== 'audio' || !audioRef.current) return
+            audioRef.current.srcObject = new MediaStream([track])
+            void audioRef.current.play().catch((e) =>
+              console.warn('[VoiceConnect] audio autoplay blocked:', e),
+            )
           },
           onDisconnected: () => {
             console.log('[VoiceConnect] Disconnected')
@@ -141,6 +155,9 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
         fontFamily: 'Inter, system-ui, sans-serif',
       }}
     >
+      {/* Hidden sink for the bot's TTS audio (attached in onTrackStarted). */}
+      <audio ref={audioRef} autoPlay playsInline style={{ display: 'none' }} />
+
       {/* Error tooltip */}
       {status === 'error' && errorMsg && (
         <div
