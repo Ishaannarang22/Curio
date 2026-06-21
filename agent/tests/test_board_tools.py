@@ -104,12 +104,12 @@ def _make_tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_tool_schemas_count():
-    assert len(TOOL_SCHEMAS) == 15
+    assert len(TOOL_SCHEMAS) == 16
 
 
 def test_tool_schemas_names():
     expected = {
-        "write_notes", "make_flowchart", "make_mindmap",
+        "write_notes", "make_flowchart", "make_mindmap", "make_diagram",
         "add_image", "highlight", "remove_block", "clear_board",
         # 8 new tools
         "append_notes", "write_explanation", "append_explanation",
@@ -130,7 +130,7 @@ def test_tool_schemas_all_have_required_keys():
 
 def test_tool_schemas_anchor_optional():
     """write_notes, make_flowchart, make_mindmap, add_image should have anchor as optional."""
-    anchor_tools = {"write_notes", "make_flowchart", "make_mindmap", "add_image"}
+    anchor_tools = {"write_notes", "make_flowchart", "make_mindmap", "make_diagram", "add_image"}
     for schema in TOOL_SCHEMAS:
         fn = schema["function"]
         if fn["name"] in anchor_tools:
@@ -141,7 +141,7 @@ def test_tool_schemas_anchor_optional():
 
 def test_tool_schemas_topicId_required_on_create_tools():
     """write_notes, make_flowchart, make_mindmap, add_image must require topicId."""
-    create_tools = {"write_notes", "make_flowchart", "make_mindmap", "add_image"}
+    create_tools = {"write_notes", "make_flowchart", "make_mindmap", "make_diagram", "add_image"}
     for schema in TOOL_SCHEMAS:
         fn = schema["function"]
         if fn["name"] in create_tools:
@@ -629,31 +629,50 @@ async def test_resolve_placement_grid_packing_no_overlap():
 
 
 @pytest.mark.asyncio
-async def test_resolve_placement_grid_wraps_to_next_row():
-    """After _COL_COUNT columns the next block starts on a new row."""
-    state = FakeState()
+async def test_resolve_placement_avoids_overlap_with_filled_row():
+    """The lattice packer must place a new block where it overlaps nothing on the
+    board (exact coords are an implementation detail of the lattice)."""
+    from board_tools import _overlaps
 
-    # Fill one full row.
-    for i in range(_COL_COUNT):
-        bid = f"row0_{i}"
+    state = FakeState()
+    filled = [
+        {
+            "x": float(_ORIGIN_X + i * (_BLOCK_W + _GAP)),
+            "y": float(_ORIGIN_Y),
+            "w": float(_BLOCK_W),
+            "h": float(_BLOCK_H),
+        }
+        for i in range(_COL_COUNT)
+    ]
+    for i, bbox in enumerate(filled):
         await state.upsert_block({
-            "id": bid,
-            "topicId": "t",
-            "type": "notes",
-            "title": "",
-            "content": "",
-            "bbox": {
-                "x": float(_ORIGIN_X + i * (_BLOCK_W + _GAP)),
-                "y": float(_ORIGIN_Y),
-                "w": float(_BLOCK_W),
-                "h": float(_BLOCK_H),
-            },
-            "shapeIds": [],
+            "id": f"row0_{i}", "topicId": "t", "type": "notes",
+            "title": "", "content": "", "bbox": bbox, "shapeIds": [],
             "updatedAt": time.time(),
         })
 
-    pos = await resolve_placement(state, "row1_0", None)
-    assert pos["y"] == pytest.approx(_ORIGIN_Y + _BLOCK_H + _GAP)
+    pos = await resolve_placement(state, "new_block", None)
+    new_rect = {"x": pos["x"], "y": pos["y"], "w": float(_BLOCK_W), "h": float(_BLOCK_H)}
+    assert not _overlaps(new_rect, filled)
+
+
+@pytest.mark.asyncio
+async def test_resolve_placement_reserves_real_size():
+    """A tall artifact's estimated size must push the next block clear of it."""
+    from board_tools import _overlaps
+
+    state = FakeState()
+    # A tall flowchart-like block already on the board.
+    tall = {"x": float(_ORIGIN_X), "y": float(_ORIGIN_Y), "w": 320.0, "h": 1200.0}
+    await state.upsert_block({
+        "id": "tall", "topicId": "t", "type": "flowchart",
+        "title": "", "content": "", "bbox": tall, "shapeIds": [],
+        "updatedAt": time.time(),
+    })
+
+    pos = await resolve_placement(state, "next", None, size={"w": 480.0, "h": 320.0})
+    new_rect = {"x": pos["x"], "y": pos["y"], "w": 480.0, "h": 320.0}
+    assert not _overlaps(new_rect, [tall])
 
 
 # ---------------------------------------------------------------------------

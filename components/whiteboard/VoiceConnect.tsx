@@ -25,6 +25,36 @@ import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport'
 
 type Status = 'idle' | 'connecting' | 'live' | 'error'
 
+/**
+ * Pull a human-readable string out of whatever the Pipecat SDK or a thrown
+ * value hands us. The SDK's onError callback passes an RTVIMessage
+ * ({ type, data }), where data is typically { error, fatal } — String()-ing
+ * that yields "[object Object]" and hides the real failure.
+ */
+function extractErrorText(value: unknown): string {
+  if (value == null) return 'Unknown error'
+  if (typeof value === 'string') return value
+  if (value instanceof Error) return value.message
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    // RTVIMessage shape: { type, data: { error, fatal } }
+    const data = obj.data
+    if (data && typeof data === 'object') {
+      const err = (data as Record<string, unknown>).error
+      if (typeof err === 'string' && err) return err
+    }
+    if (typeof obj.error === 'string' && obj.error) return obj.error
+    if (typeof obj.message === 'string' && obj.message) return obj.message
+    try {
+      const json = JSON.stringify(value)
+      if (json && json !== '{}') return json
+    } catch {
+      // fall through to the generic label below
+    }
+  }
+  return String(value)
+}
+
 interface VoiceConnectProps {
   /** Session id shared with the board SSE stream so the agent targets the right board. */
   session?: string
@@ -91,7 +121,7 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
           onError: (message) => {
             console.error('[VoiceConnect] Error:', message)
             setStatus('error')
-            setErrorMsg(String(message))
+            setErrorMsg(extractErrorText(message))
           },
         },
       })
@@ -104,7 +134,7 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
     } catch (err) {
       console.error('[VoiceConnect] Connection failed:', err)
       setStatus('error')
-      setErrorMsg(err instanceof Error ? err.message : String(err))
+      setErrorMsg(extractErrorText(err))
       clientRef.current = null
     }
   }, [agentBase, session])

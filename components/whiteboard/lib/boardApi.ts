@@ -12,6 +12,7 @@ import {
   forceLink,
   forceManyBody,
   forceCollide,
+  forceCenter,
   SimulationNodeDatum,
   SimulationLinkDatum,
 } from 'd3-force'
@@ -671,6 +672,101 @@ async function runElkLayout(
   })
 
   await Promise.all(promises)
+}
+
+// ─── addDiagram ───────────────────────────────────────────────────────────────
+// A free-form relationship graph: arbitrary nodes connected by (optionally
+// labelled) edges — distinct from the mind-map (radial star) and flowchart
+// (linear sequence). Nodes reuse the mind-map-node shape; layout is a general
+// d3-force pass over the actual edge set (not just centre→branch), centred on
+// the anchor. `position` is treated as the CENTRE of the diagram (Python passes
+// the centre of its reserved slot so the spread stays inside that region).
+export async function addDiagram(
+  editor: Editor,
+  blockId: string,
+  nodes: { id: string; label: string }[],
+  edges: { fromId: string; toId: string; label?: string }[],
+  position?: { x: number; y: number }
+) {
+  void blockId
+  const vp = editor.getViewportPageBounds()
+  const cx = position?.x ?? vp.x + vp.w / 2
+  const cy = position?.y ?? vp.y + vp.h / 2
+
+  // Create (or update) every node, seeded near the centre so the sim spreads
+  // them outward from a sensible start.
+  for (const n of nodes) {
+    let tlId = getTLId(n.id)
+    if (!tlId || !editor.getShape(tlId)) {
+      tlId = createShapeId()
+      setTLId(n.id, tlId)
+      editor.createShape({
+        id: tlId,
+        type: 'mind-map-node',
+        x: cx - 75 + (Math.random() * 120 - 60),
+        y: cy - 24 + (Math.random() * 120 - 60),
+        props: { label: n.label, isCenter: false, w: 150, h: 48, highlighted: false },
+      })
+      scheduleAppearAnimation(editor, tlId)
+    } else {
+      editor.updateShape({ id: tlId, type: 'mind-map-node', props: { label: n.label } })
+    }
+  }
+
+  // Draw the edges (bound arrows follow the nodes once the sim settles them).
+  for (const e of edges) {
+    connectNodes(editor, e.fromId, e.toId, e.label)
+  }
+
+  await runDiagramForceLayout(editor, nodes.map((n) => n.id), edges, cx, cy)
+  await zoomToContent(editor)
+}
+
+async function runDiagramForceLayout(
+  editor: Editor,
+  nodeIds: string[],
+  edges: { fromId: string; toId: string }[],
+  cx: number,
+  cy: number
+) {
+  type FNode = SimulationNodeDatum & { id: string }
+  type FLink = SimulationLinkDatum<FNode>
+
+  const nodes: FNode[] = nodeIds.map((id) => {
+    const s = editor.getShape(getTLId(id)!)
+    return { id, x: (s?.x ?? cx) + 75, y: (s?.y ?? cy) + 24 }
+  })
+
+  // Only keep edges whose endpoints both exist as nodes.
+  const valid = new Set(nodeIds)
+  const links: FLink[] = edges
+    .filter((e) => valid.has(e.fromId) && valid.has(e.toId))
+    .map((e) => ({ source: e.fromId, target: e.toId }))
+
+  // No fixed node here (unlike the mind-map), so forceCenter keeps the whole
+  // graph anchored at (cx, cy) instead of drifting. Charge repels, links spring,
+  // collide prevents overlap.
+  const sim = forceSimulation<FNode>(nodes)
+    .force('link', forceLink<FNode, FLink>(links).id((d) => d.id).distance(170).strength(0.6))
+    .force('charge', forceManyBody().strength(-700))
+    .force('collide', forceCollide(95))
+    .force('center', forceCenter(cx, cy))
+    .stop()
+
+  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()))
+  for (let i = 0; i < ticks; i++) sim.tick()
+
+  const partials = nodes
+    .map((n) => {
+      const tlId = getTLId(n.id)
+      if (!tlId) return null
+      return { id: tlId, type: 'mind-map-node' as const, x: (n.x ?? cx) - 75, y: (n.y ?? cy) - 24 }
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+  editor.animateShapes(partials, {
+    animation: { duration: 400, easing: (t) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t) },
+  })
+  await sleep(420)
 }
 
 // ─── appendMarkdown ───────────────────────────────────────────────────────────

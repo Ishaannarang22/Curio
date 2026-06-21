@@ -40,6 +40,23 @@ Because there's no time/voice cue, "is this topic done?" is answered **retroacti
 - If the student **returns** to a sealed topic, structuring **re-opens and re-runs**.
   All structuring is therefore reversible and append-able (idempotent over raw input).
 
+**Detection (locked).** A cheap **per-turn classifier** runs in the Python voice
+backend on every Flux `EndOfTurn` utterance. Given the topic **tree skeleton**
+(node ids + labels, marking active/sibling/sealed), the **full raw of the active
+node**, and the new utterance, it emits a tree-move verdict:
+`CONTINUE | DESCEND(label) | SIBLING(label) | ASCEND | RETURN(id)`. Sealing is
+**semantic only — no timers, no voice gaps**. The triggering utterance is
+attributed to the **destination** node (the sealed node keeps only its own raw).
+The **trailing topic** (last one talked about) is sealed on **session
+end / disconnect** — the only non-content trigger.
+
+**Fire timing.** A **leaf seal** structures that leaf's raw immediately
+(provisional artifact, live feedback). A **parent seal** (student leaves the
+whole subtree) re-runs structuring over the **whole subtree's raw**; the LLM
+decides granularity (keep N child artifacts vs merge into one), overriding the
+provisional views. (Replaces the `board_writer.py` prototype's 8s idle-timer +
+`topicId`-minting model.)
+
 ### 1.4 Source of truth — raw retained, structure derived (event-sourcing-style)
 
 - The **raw transcript per topic is the permanent source of truth.** After structuring,
@@ -64,15 +81,18 @@ This keeps the data model honest: agents only ever read raw and emit projections
 ## 2. Structured output requirements
 
 The Structuring Agent (see [implementation.md](./implementation.md) §"Structuring
-Agent") **chooses the form from the content's shape** (default, no friction):
+Agent") runs **two stages** per seal — first *does this even need restructuring?*, then
+*which form?* — and **chooses the form from the content's shape** (default, no friction):
 
 - sequential / process → **flowchart**
-- hierarchical / branching → **mind map**
-- relationships between things → **diagram**
-- otherwise → **cleaned, structured text**
+- one central concept radiating out → **mind map**
+- relationships between things (a graph) → **diagram**
+- **none of the above → leave the raw text as-is** (no forced shape; "cleaned, structured
+  text" is not a separate render — short/narrative/single-idea topics simply stay raw).
 
-The **student can override by voice** ("make that a mind map instead"). Since the view
-is a regenerable projection, swapping form is just a re-render.
+The three shapes are real one-shot board tools (`make_flowchart` / `make_mindmap` /
+`make_diagram`). The **student can override by voice** ("make that a mind map instead").
+Since the view is a regenerable projection, swapping form is just a re-render.
 
 ## 3. Study artifact requirements
 
@@ -130,3 +150,7 @@ flashcards.
 | 16 | Persistence = **Supabase** (Postgres + PostgREST), `messages(conversation_id, role, content)`, RLS via end-user JWT | The voice agent already writes turns this way; reuse it as the durable transcript store. |
 | 17 | Observability = **Sentry** across web (`@sentry/nextjs`) + agent (`sentry_sdk`), shared DSN; our agents traced as spans with token usage | One project = end-to-end traceable study session. See implementation.md §4. |
 | 18 | Talk-back owner = **Curio (our Inference Layer)**, not pulse's per-turn LLM; pulse is reduced to STT/TTS transport | Curio must be mostly silent and speak only at topic boundaries (#4/#5); a per-turn conversational brain fights that. Requires an inbound "speak this" channel + removing pulse's per-turn LLM from the speaking path. See implementation.md §3.4–3.5. |
+| 19 | Topic boundary = **per-turn classifier** in the Python voice backend over the Flux EndOfTurn stream; verdict `CONTINUE / DESCEND / SIBLING / ASCEND / RETURN` against a **recursive topic tree** | Cheap hot-path detector, separate from the heavy Structuring Agent. Replaces board_writer.py's idle-timer + topicId model. |
+| 20 | Sealing is **semantic only — no timers, no voice gaps**; trailing topic sealed on **session end** | Honors #7 (no reliable time/voice cue); session-end is the one unambiguous non-content trigger for the last topic. |
+| 21 | Triggering utterance is attributed to the **destination** node | Keeps each node's raw clean (sealed node not polluted by the sentence that ended it). |
+| 22 | **Leaf seal** structures provisionally; **parent seal** re-renders the whole subtree, LLM decides 1-vs-N granularity | Live feedback as the student goes + clean bottom-up rollup; granularity floor (#1.2) delegated to LLM judgment, not a fixed heuristic. |
