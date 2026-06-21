@@ -73,9 +73,9 @@ def _clamp_str(s: str, max_chars: int, field: str = "field") -> str:
 # Layout constants (simple grid packing — real geometry comes back via M4)
 # ---------------------------------------------------------------------------
 
-_BLOCK_W = 480       # assumed block width (pixels)
-_BLOCK_H = 320       # assumed block height
-_GAP = 40            # gap between blocks
+_BLOCK_W = 480       # default/fallback block width (pixels)
+_BLOCK_H = 320       # default/fallback block height
+_GAP = 40            # gap reserved between blocks
 _COL_COUNT = 3       # blocks per row before wrapping
 _ORIGIN_X = 100
 _ORIGIN_Y = 100
@@ -85,6 +85,48 @@ _DIR_OFFSET = {      # pixel offsets for anchor.dir hints
     "below":  (0, _BLOCK_H + _GAP),
     "above":  (0, -(_BLOCK_H + _GAP)),
 }
+
+# Lattice the packer scans for a free slot. Fine enough to fill gaps between
+# variably-sized artifacts, coarse enough to stay cheap.
+_PLACE_STEP = 200
+_PLACE_MAX_COLS = 8
+_PLACE_MAX_ROWS = 80
+
+
+# ---------------------------------------------------------------------------
+# Size estimation — reserve a realistic bbox BEFORE the board lays a shape out.
+# The board's force/ELK layout only reports its true extent afterward, but the
+# packer needs a size up front to avoid dropping two artifacts in one spot
+# (the chicken-and-egg). Estimates are deliberately generous (>= real footprint)
+# so non-overlap is guaranteed; they self-correct only cosmetically if a later
+# geometry write-back lands.
+# ---------------------------------------------------------------------------
+
+
+def estimate_size(tool_name: str, args: dict[str, Any]) -> dict[str, float]:
+    """Return a generous ``{w, h}`` footprint estimate for a create tool's args."""
+    if tool_name == "make_flowchart":
+        n = max(1, len(args.get("steps") or []))
+        return {"w": 320.0, "h": min(2000.0, n * 150.0 + 60.0)}
+    if tool_name == "make_mindmap":
+        n = max(1, len(args.get("branches") or []))
+        d = min(1600.0, 420.0 + n * 60.0)
+        return {"w": d, "h": d}
+    if tool_name == "make_diagram":
+        n = max(1, len(args.get("nodes") or []))
+        d = min(1800.0, 460.0 + n * 70.0)
+        return {"w": d, "h": d}
+    if tool_name in ("write_notes", "append_notes"):
+        text = str(args.get("markdown", ""))
+        lines = sum(max(1, len(ln) // 60 + 1) for ln in (text.splitlines() or [""]))
+        return {"w": 480.0, "h": min(1200.0, max(160.0, lines * 24.0 + 60.0))}
+    return {"w": float(_BLOCK_W), "h": float(_BLOCK_H)}
+
+
+# Formats whose board-side layout is anchored at the CENTRE of the shape
+# (radial/force) rather than its top-left. For these the handler converts the
+# packer's top-left slot to a centre before sending `position`.
+_CENTER_ANCHORED: frozenset[str] = frozenset({"make_mindmap", "make_diagram"})
 
 # ---------------------------------------------------------------------------
 # TOOL_SCHEMAS — OpenAI function-calling tool definitions (7 tools)
@@ -265,6 +307,79 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "anchor": _ANCHOR_SCHEMA,
                 },
                 "required": ["id", "topicId", "center", "branches"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # make_diagram → addDiagram
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "make_diagram",
+            "description": (
+                "Add or update a relationship diagram: a free-form graph of nodes "
+                "connected by (optionally labelled) edges. Use when the RELATIONSHIPS "
+                "between things are the point — not a linear process (use make_flowchart) "
+                "and not one centre radiating outward (use make_mindmap). Client-side "
+                "force layout positions the nodes automatically."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Stable semantic id for this diagram block.",
+                    },
+                    "topicId": {
+                        "type": "string",
+                        "description": "Stable id of the TOPIC thread this block belongs to.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title of the diagram.",
+                    },
+                    "nodes": {
+                        "type": "array",
+                        "description": "The entities in the diagram.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Unique id for this node (scoped to this diagram).",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Node label.",
+                                },
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": False,
+                        },
+                        "minItems": 1,
+                    },
+                    "edges": {
+                        "type": "array",
+                        "description": "Relationships between nodes (directed; fromId → toId).",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "fromId": {"type": "string", "description": "Source node id."},
+                                "toId": {"type": "string", "description": "Target node id."},
+                                "label": {
+                                    "type": "string",
+                                    "description": "Optional label shown on the edge.",
+                                },
+                            },
+                            "required": ["fromId", "toId"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "anchor": _ANCHOR_SCHEMA,
+                },
+                "required": ["id", "topicId", "title", "nodes", "edges"],
                 "additionalProperties": False,
             },
         },
@@ -726,16 +841,23 @@ async def resolve_placement(
     state: Any,
     block_id: str,
     anchor: dict[str, Any] | None,
+    size: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """Return ``{x, y}`` for *block_id*.
+    """Return the top-left ``{x, y}`` to place *block_id* at.
+
+    ``size`` is the artifact's estimated ``{w, h}`` footprint (see ``estimate_size``);
+    the packer reserves that much room so a tall flowchart or wide mind map never
+    lands on top of a neighbour. Defaults to the legacy fixed block size.
 
     Algorithm:
     1. If the block already has a stored bbox with non-zero coords, reuse it.
-    2. If ``anchor.near`` points to an existing block, offset from that block's
-       position according to ``anchor.dir``.
-    3. Otherwise, pick the next open slot in a simple left-to-right, top-to-bottom
-       grid that doesn't overlap any existing bbox.
+    2. If ``anchor.near`` points to an existing block, offset from it by ``anchor.dir``.
+    3. Otherwise scan a lattice for the first slot whose ``size`` rect (inflated by
+       a gap) overlaps nothing on the board.
     """
+    w = float((size or {}).get("w", _BLOCK_W))
+    h = float((size or {}).get("h", _BLOCK_H))
+
     # -- 1. Reuse existing position --
     existing = await state.get_block(block_id)
     if existing:
@@ -753,25 +875,25 @@ async def resolve_placement(
             dx, dy = _DIR_OFFSET.get(anchor.get("dir", "right"), (_BLOCK_W + _GAP, 0))
             return {"x": nx + dx, "y": ny + dy}
 
-    # -- 3. Grid packing: find first open slot --
+    # -- 3. Lattice packing: first slot whose footprint (plus a gap) is clear --
     summary = await state.get_state_summary()
     bboxes = _occupied_bboxes(summary)
 
-    col = 0
-    row = 0
-    while True:
-        candidate = {
-            "x": float(_ORIGIN_X + col * (_BLOCK_W + _GAP)),
-            "y": float(_ORIGIN_Y + row * (_BLOCK_H + _GAP)),
-            "w": float(_BLOCK_W),
-            "h": float(_BLOCK_H),
-        }
-        if not _overlaps(candidate, bboxes):
-            return {"x": candidate["x"], "y": candidate["y"]}
-        col += 1
-        if col >= _COL_COUNT:
-            col = 0
-            row += 1
+    for row in range(_PLACE_MAX_ROWS):
+        for col in range(_PLACE_MAX_COLS):
+            x = float(_ORIGIN_X + col * _PLACE_STEP)
+            y = float(_ORIGIN_Y + row * _PLACE_STEP)
+            # Inflate by _GAP so artifacts keep breathing room between them.
+            candidate = {"x": x, "y": y, "w": w + _GAP, "h": h + _GAP}
+            if not _overlaps(candidate, bboxes):
+                return {"x": x, "y": y}
+
+    # Board is densely packed — stack below everything as a last resort.
+    max_bottom = max(
+        (b["y"] + b.get("h", _BLOCK_H) for b in bboxes),
+        default=float(_ORIGIN_Y),
+    )
+    return {"x": float(_ORIGIN_X), "y": float(max_bottom + _GAP)}
 
 # ---------------------------------------------------------------------------
 # Main executor
@@ -854,6 +976,8 @@ async def _dispatch(
         return await _make_flowchart(args, state=state, bridge=bridge, active_topic=active_topic)
     elif tool_name == "make_mindmap":
         return await _make_mindmap(args, state=state, bridge=bridge, active_topic=active_topic)
+    elif tool_name == "make_diagram":
+        return await _make_diagram(args, state=state, bridge=bridge, active_topic=active_topic)
     elif tool_name == "add_node":
         return await _add_node(args, state=state, bridge=bridge, active_topic=active_topic)
     elif tool_name == "connect_nodes":
@@ -891,12 +1015,13 @@ async def _write_notes(
     markdown: str = _clamp_str(args.get("markdown", ""), _MAX_CONTENT_BYTES, "markdown")
     anchor: dict[str, Any] | None = args.get("anchor")
 
-    pos = await resolve_placement(state, block_id, anchor)
+    size = estimate_size("write_notes", {"markdown": markdown})
+    pos = await resolve_placement(state, block_id, anchor, size=size)
 
     await bridge.send("addMarkdown", {
         "id": block_id,
         "markdown": markdown,
-        "position": pos,
+        "position": pos,  # markdown-doc anchors at its top-left
     })
 
     await state.upsert_block({
@@ -905,7 +1030,7 @@ async def _write_notes(
         "type": "notes",
         "title": title,
         "content": markdown,
-        "bbox": {"x": pos["x"], "y": pos["y"], "w": _BLOCK_W, "h": _BLOCK_H},
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": size["w"], "h": size["h"]},
         "shapeIds": [block_id],  # single shape: the markdown-doc shape
         "updatedAt": time.time(),
     })
@@ -937,10 +1062,11 @@ async def _make_flowchart(
     ]
     anchor: dict[str, Any] | None = args.get("anchor")
 
-    pos = await resolve_placement(state, block_id, anchor)
+    size = estimate_size("make_flowchart", {"steps": steps})
+    pos = await resolve_placement(state, block_id, anchor, size=size)
 
     # addFlowchart payload: steps array is forwarded as-is; the client keys
-    # each shape by the step id inside the idMap.
+    # each shape by the step id inside the idMap. ELK anchors at the top-left.
     await bridge.send("addFlowchart", {
         "id": block_id,
         "steps": steps,
@@ -957,7 +1083,7 @@ async def _make_flowchart(
         "type": "flowchart",
         "title": title,
         "content": str([s.get("label") for s in steps]),
-        "bbox": {"x": pos["x"], "y": pos["y"], "w": _BLOCK_W, "h": _BLOCK_H},
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": size["w"], "h": size["h"]},
         "shapeIds": shape_ids,
         "updatedAt": time.time(),
     })
@@ -989,14 +1115,17 @@ async def _make_mindmap(
     ]
     anchor: dict[str, Any] | None = args.get("anchor")
 
-    pos = await resolve_placement(state, block_id, anchor)
+    size = estimate_size("make_mindmap", {"branches": branches})
+    pos = await resolve_placement(state, block_id, anchor, size=size)
+    # addMindMap anchors at the CENTRE of the map → convert the top-left slot.
+    center = {"x": pos["x"] + size["w"] / 2, "y": pos["y"] + size["h"] / 2}
 
     # addMindMap payload: center label + branches array forwarded as-is.
     await bridge.send("addMindMap", {
         "id": block_id,
         "centerLabel": center_label,
         "branches": branches,
-        "position": pos,
+        "position": center,
     })
 
     # Track center shape + all branch shapes.
@@ -1012,12 +1141,84 @@ async def _make_mindmap(
         "type": "mindmap",
         "title": center_label,
         "content": str([b.get("label") for b in branches]),
-        "bbox": {"x": pos["x"], "y": pos["y"], "w": _BLOCK_W, "h": _BLOCK_H},
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": size["w"], "h": size["h"]},
         "shapeIds": shape_ids,
         "updatedAt": time.time(),
     })
 
     return {"action": "addMindMap", "id": block_id, "shapeIds": shape_ids}
+
+
+async def _make_diagram(
+    args: dict[str, Any],
+    *,
+    state: Any,
+    bridge: BridgePoster,
+    active_topic: str,
+) -> dict[str, Any]:
+    block_id: str = _valid_id(args["id"])
+    title: str = _clamp_str(args.get("title", ""), _MAX_TITLE_CHARS, "title")
+
+    raw_nodes: list[dict[str, Any]] = args.get("nodes", [])
+    if len(raw_nodes) > _MAX_BRANCHES:
+        logger.warning(f"board_tools: diagram nodes truncated from {len(raw_nodes)} to {_MAX_BRANCHES}")
+        raw_nodes = raw_nodes[:_MAX_BRANCHES]
+    nodes: list[dict[str, Any]] = [
+        {
+            **n,
+            "id": _valid_id(n.get("id"), "node.id"),
+            "label": _clamp_str(n.get("label", ""), _MAX_LABEL_CHARS, "node.label"),
+        }
+        for n in raw_nodes
+    ]
+    node_ids = {n["id"] for n in nodes}
+
+    raw_edges: list[dict[str, Any]] = args.get("edges", [])
+    if len(raw_edges) > _MAX_BRANCHES:
+        logger.warning(f"board_tools: diagram edges truncated from {len(raw_edges)} to {_MAX_BRANCHES}")
+        raw_edges = raw_edges[:_MAX_BRANCHES]
+    edges: list[dict[str, Any]] = []
+    for e in raw_edges:
+        from_id = _valid_id(e.get("fromId"), "edge.fromId")
+        to_id = _valid_id(e.get("toId"), "edge.toId")
+        # Drop edges that reference a node we didn't create — a dangling arrow
+        # would silently no-op on the board anyway.
+        if from_id not in node_ids or to_id not in node_ids:
+            logger.warning(f"board_tools: dropping diagram edge {from_id!r}→{to_id!r} (unknown node)")
+            continue
+        edge: dict[str, Any] = {"fromId": from_id, "toId": to_id}
+        if e.get("label"):
+            edge["label"] = _clamp_str(e["label"], _MAX_LABEL_CHARS, "edge.label")
+        edges.append(edge)
+
+    anchor: dict[str, Any] | None = args.get("anchor")
+
+    size = estimate_size("make_diagram", {"nodes": nodes})
+    pos = await resolve_placement(state, block_id, anchor, size=size)
+    # addDiagram anchors at the CENTRE (force layout) → convert the top-left slot.
+    center = {"x": pos["x"] + size["w"] / 2, "y": pos["y"] + size["h"] / 2}
+
+    await bridge.send("addDiagram", {
+        "id": block_id,
+        "nodes": nodes,
+        "edges": edges,
+        "position": center,
+    })
+
+    shape_ids = [n["id"] for n in nodes]
+
+    await state.upsert_block({
+        "id": block_id,
+        "topicId": active_topic,
+        "type": "diagram",
+        "title": title,
+        "content": str([n.get("label") for n in nodes]),
+        "bbox": {"x": pos["x"], "y": pos["y"], "w": size["w"], "h": size["h"]},
+        "shapeIds": shape_ids,
+        "updatedAt": time.time(),
+    })
+
+    return {"action": "addDiagram", "id": block_id, "shapeIds": shape_ids}
 
 
 async def _add_image(
