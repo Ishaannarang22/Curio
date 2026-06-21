@@ -7,7 +7,7 @@
 import dynamic from 'next/dynamic'
 
 const WhiteboardApp = dynamic(
-  () => import('@/components/whiteboard/WhiteboardApp').then((m) => m.WhiteboardApp),
+  () => import('@/components/whiteboard/WhiteboardApp'),
   {
     ssr: false,
     loading: () => (
@@ -31,5 +31,13 @@ const WhiteboardApp = dynamic(
 )
 
 export default function WhiteboardPage() {
-  return <WhiteboardApp />
+  // Legacy entry point: no durable board row, so the board id == the LIVE
+  // `?session=` value (or "default"). Persistence PUTs will 404 against a
+  // non-existent board row and are silently swallowed — the live board still
+  // works. The first-class durable path is /boards/[id] (BoardCanvas).
+  const boardId =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('session') ?? 'default'
+      : 'default'
+  return <WhiteboardApp boardId={boardId} />
 }

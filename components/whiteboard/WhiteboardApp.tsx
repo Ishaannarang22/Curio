@@ -21,6 +21,8 @@ import { setEditor, connectBoardStream } from './lib/commandQueue'
 import { VoiceConnect } from './VoiceConnect'
 // M4 board-side Redis sync — best-effort, board still works if /api/board is down.
 import { setSession, fetchBoard, reportGeometry } from './lib/boardSync'
+// Durable Supabase persistence (snapshot truth + debounced autosave).
+import { createAutosave } from './lib/persistence'
 // Client-side non-overlap guarantee. The agent proposes positions; the guard
 // guarantees no two blocks overlap, reacting to creation, growth, and drags.
 import { markUserMoved, noteChanged, isSuppressed, scheduleResolve } from './lib/layoutGuard'
@@ -28,22 +30,36 @@ import { markUserMoved, noteChanged, isSuppressed, scheduleResolve } from './lib
 const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil, MarkdownDocUtil]
 
 interface WhiteboardAppProps {
-  /** Session id used to namespace this board in Redis and the SSE stream.
-   *  Defaults to the `?session=` URL param, or "default" if absent. */
-  session?: string
+  /** Durable board id — also the LIVE `session` for Redis/SSE/geometry sync.
+   *  (Board id === the existing Redis/SSE `session` value.) */
+  boardId: string
+  /** A tldraw snapshot to hydrate the board with on mount, or null/undefined. */
+  initialSnapshot?: unknown | null
 }
 
-function getSessionFromUrl(): string {
-  if (typeof window === 'undefined') return 'default'
-  return new URLSearchParams(window.location.search).get('session') ?? 'default'
-}
-
-export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
-  // Derive session once (before handleMount so VoiceConnect gets the same value).
-  const sess = session ?? (typeof window !== 'undefined' ? getSessionFromUrl() : 'default')
+export default function WhiteboardApp({ boardId, initialSnapshot }: WhiteboardAppProps) {
+  // The board id IS the live session — namespaces Redis, the SSE stream, and
+  // the geometry write-back.
+  const sess = boardId
 
   const handleMount = useCallback((editor: Editor) => {
     setEditor(editor)
+
+    // ── Durable hydration ────────────────────────────────────────────────────
+    // If a snapshot was passed (C's server route loads it from Supabase), load
+    // it BEFORE wiring autosave so we don't immediately re-save what we just
+    // hydrated. `applyingInitial` gates the autosave listener below.
+    let applyingInitial = false
+    if (initialSnapshot != null) {
+      try {
+        applyingInitial = true
+        editor.loadSnapshot(initialSnapshot as Parameters<Editor['loadSnapshot']>[0])
+      } catch (err) {
+        console.warn('[WhiteboardApp] failed to hydrate snapshot:', (err as Error).message)
+      } finally {
+        applyingInitial = false
+      }
+    }
 
     // Connect to the same-origin SSE board stream (replaced the old WS mock server).
     // The stream is served by /api/board/stream?session=<sess> (:3000, same-origin).
@@ -143,11 +159,27 @@ export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
       { scope: 'document' }, // ALL sources — agent writes included
     )
 
-    // Return value from useCallback is ignored by tldraw; store unsubs for cleanup.
-    // We attach them to the editor instance as non-reactive properties.
-    ;(editor as Editor & { _boardSyncUnsub?: () => void; _layoutGuardUnsub?: () => void })._boardSyncUnsub = unsub
-    ;(editor as Editor & { _boardSyncUnsub?: () => void; _layoutGuardUnsub?: () => void })._layoutGuardUnsub = unsubGuard
-  }, [sess])
+    // ── Durable autosave (debounced ~1.5s) → Supabase ────────────────────────
+    // On any store change, schedule a save of the full snapshot + derived rows.
+    // Skipped while the initial hydration is still applying so we don't echo it.
+    const autosave = createAutosave(boardId, editor)
+    const unsubAutosave = editor.store.listen(
+      () => {
+        if (applyingInitial) return
+        autosave.schedule()
+      },
+      { scope: 'document' }, // persist agent AND user writes
+    )
+
+    // tldraw's onMount accepts a cleanup callback — tear down every listener and
+    // cancel the autosave timer on unmount so nothing leaks across boards.
+    return () => {
+      unsub()
+      unsubGuard()
+      unsubAutosave()
+      autosave.cancel()
+    }
+  }, [sess, boardId, initialSnapshot])
 
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
