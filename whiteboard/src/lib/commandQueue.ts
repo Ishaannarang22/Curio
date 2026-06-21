@@ -52,6 +52,15 @@ async function execute(cmd: Command) {
         await sleep(Math.min(900, Math.max(600, (p.moreText as string).length * 18)) + 100)
         break
 
+      case 'addMarkdown':
+        api.addMarkdown(editor, p.markdown as string, {
+          id: p.id as string | undefined,
+          position: p.position as { x: number; y: number } | undefined,
+          size: p.size as { w?: number; h?: number } | undefined,
+        })
+        await sleep(250)
+        break
+
       case 'addFlowNode':
         api.addFlowNode(editor, p.id as string, p.label as string, p.subtitle as string | undefined, p.position as { x: number; y: number } | undefined)
         await sleep(250)

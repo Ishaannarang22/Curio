@@ -4,6 +4,7 @@ import {
   createShapeId,
 } from '@tldraw/tldraw'
 import ELK from 'elkjs/lib/elk.bundled.js'
+import { sanitizeMarkdown } from '../editor/markdown'
 import {
   forceSimulation,
   forceLink,
@@ -161,6 +162,50 @@ function animateReveal(
     if (progress < 1) requestAnimationFrame(tick)
   }
   requestAnimationFrame(tick)
+}
+
+// ─── addMarkdown ───────────────────────────────────────────────────────────────
+// Renders a markdown document as ONE auto-growing tldraw shape, edited in place
+// with a Notion-style WYSIWYG editor (see shapes/MarkdownDoc.tsx). Pass the
+// markdown text as `markdown` (the harness/caller supplies it; the browser can't
+// read files). An optional `id` lets the voice agent update/replace a doc it
+// created earlier instead of stacking a new one.
+export function addMarkdown(
+  editor: Editor,
+  markdown: string,
+  options?: {
+    id?: string
+    position?: { x: number; y: number }
+    size?: { w?: number; h?: number }
+  }
+) {
+  const md = sanitizeMarkdown(markdown)
+  if (!md.trim()) return
+
+  const key = options?.id ?? `md_${Date.now()}`
+  const w = options?.size?.w ?? 420
+
+  // Update-by-id: if this doc already exists, replace its content in place.
+  if (options?.id) {
+    const existing = getTLId(key)
+    if (existing && editor.getShape(existing)) {
+      editor.updateShape({ id: existing, type: 'markdown-doc', props: { markdown: md } })
+      return
+    }
+  }
+
+  const anchor = options?.position ?? randomPosition(editor)
+  const id = createShapeId()
+  setTLId(key, id)
+  editor.createShape({
+    id,
+    type: 'markdown-doc',
+    x: anchor.x,
+    y: anchor.y,
+    // h is a placeholder; the shape measures its real content height and grows.
+    props: { w, h: 120, markdown: md, highlighted: false },
+  })
+  scheduleAppearAnimation(editor, id)
 }
 
 // ─── addFlowNode ──────────────────────────────────────────────────────────────
