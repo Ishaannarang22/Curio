@@ -519,11 +519,13 @@ class BoardWriter(FrameProcessor):
             logger.debug(f"Phase3: no tool calls returned for {sealed_topic!r}")
             return
 
-        # Execute in order. Spec: replacement ALWAYS before removals.
-        for tc in tool_calls:
+        # SAFETY: regardless of the order the LLM emitted them, always execute
+        # create/write calls BEFORE remove_block calls so a fragment is never
+        # deleted before its replacement is on the board.
+        ordered = _sort_writes_before_removes(tool_calls)
+
+        for tc in ordered:
             fn_name = tc.get("function", {}).get("name", "")
-            # Skip remove_block calls until after the first artifact is written.
-            # The model is instructed to do this, but we guard defensively.
             await execute_tool_call(
                 tc,
                 state=self._state,
@@ -577,6 +579,33 @@ class BoardWriter(FrameProcessor):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Tools that CREATE or UPDATE content on the board (must run before removes).
+_CREATE_TOOLS: frozenset[str] = frozenset({
+    "write_notes", "make_flowchart", "make_mindmap", "add_image",
+})
+# Tools that REMOVE content (must run after all creates).
+_REMOVE_TOOLS: frozenset[str] = frozenset({"remove_block", "clear_board"})
+
+
+def _sort_writes_before_removes(
+    tool_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Reorder *tool_calls* so every create/write call precedes every remove call.
+
+    Preserves relative order within each group (stable partition).
+    This prevents a fragment from being deleted before its replacement is written,
+    even when the LLM emits removes first.
+    """
+    creates = [tc for tc in tool_calls
+                if tc.get("function", {}).get("name", "") in _CREATE_TOOLS]
+    removes = [tc for tc in tool_calls
+                if tc.get("function", {}).get("name", "") in _REMOVE_TOOLS]
+    others  = [tc for tc in tool_calls
+                if tc.get("function", {}).get("name", "") not in _CREATE_TOOLS | _REMOVE_TOOLS]
+    # Order: creates → other (e.g. highlight) → removes
+    return creates + others + removes
+
 
 def _fresh_topic_id() -> str:
     """Generate a short unique topic id when the model doesn't provide one."""

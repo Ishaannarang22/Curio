@@ -47,10 +47,10 @@
 
 | Tool | Params | Bridge action (`commandQueue.ts`) |
 |---|---|---|
-| `write_notes` | `id, title, markdown, anchor?` | `addMarkdown` — prose / bullets / **tables** (default text artifact + morph target) |
-| `make_flowchart` | `id, title, steps[], anchor?` | `addFlowchart` (client-side ELK layout) |
-| `make_mindmap` | `id, center, branches[], anchor?` | `addMindMap` (client-side d3-force) |
-| `add_image` | `id, prompt, caption?, anchor?` | `requestImage` → `resolveImage` (generation **stubbed** in v1) |
+| `write_notes` | `id, topicId, title, markdown, anchor?` | `addMarkdown` — prose / bullets / **tables** (default text artifact + morph target) |
+| `make_flowchart` | `id, topicId, title, steps[], anchor?` | `addFlowchart` (client-side ELK layout) |
+| `make_mindmap` | `id, topicId, center, branches[], anchor?` | `addMindMap` (client-side d3-force) |
+| `add_image` | `id, topicId, prompt, caption?, anchor?` | `requestImage` → `resolveImage` (generation **stubbed** in v1) |
 | `highlight` | `id` | `highlightNode` — pulse a block while referencing it |
 | `remove_block` | `id` | `removeNode` |
 | `clear_board` | — | `clearBoard` |
@@ -77,11 +77,12 @@
       "type": "object",
       "properties": {
         "id":       { "type": "string", "description": "Stable semantic id, e.g. 'topic_photosynthesis'." },
+        "topicId":  { "type": "string", "description": "Stable id of the TOPIC thread this block belongs to. Reuse the same topicId for every block in one topic; mint a NEW topicId when the student moves to a new topic." },
         "title":    { "type": "string", "description": "Short topic title." },
         "markdown": { "type": "string", "description": "Full cleaned Markdown body for the block (headings, **bold**, lists, tables)." },
         "anchor":   { "$ref": "#/$defs/anchor" }
       },
-      "required": ["id", "title", "markdown"]
+      "required": ["id", "topicId", "title", "markdown"]
     }
   }
 }
@@ -96,8 +97,9 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "id":    { "type": "string", "description": "Stable semantic id, e.g. 'flow_photosynthesis'." },
-        "title": { "type": "string" },
+        "id":      { "type": "string", "description": "Stable semantic id, e.g. 'flow_photosynthesis'." },
+        "topicId": { "type": "string", "description": "Stable id of the TOPIC thread this block belongs to. Reuse the same topicId for every block in one topic; mint a NEW topicId when the student moves to a new topic." },
+        "title":   { "type": "string" },
         "steps": {
           "type": "array",
           "description": "Ordered steps; connected sequentially. Step ids are stable across updates.",
@@ -113,7 +115,7 @@
         },
         "anchor": { "$ref": "#/$defs/anchor" }
       },
-      "required": ["id", "title", "steps"]
+      "required": ["id", "topicId", "title", "steps"]
     }
   }
 }
@@ -128,8 +130,9 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "id":     { "type": "string", "description": "Stable semantic id, e.g. 'map_cell_biology'." },
-        "center": { "type": "string", "description": "Center node label." },
+        "id":      { "type": "string", "description": "Stable semantic id, e.g. 'map_cell_biology'." },
+        "topicId": { "type": "string", "description": "Stable id of the TOPIC thread this block belongs to. Reuse the same topicId for every block in one topic; mint a NEW topicId when the student moves to a new topic." },
+        "center":  { "type": "string", "description": "Center node label." },
         "branches": {
           "type": "array",
           "items": {
@@ -143,7 +146,7 @@
         },
         "anchor": { "$ref": "#/$defs/anchor" }
       },
-      "required": ["id", "center", "branches"]
+      "required": ["id", "topicId", "center", "branches"]
     }
   }
 }
@@ -159,11 +162,12 @@
       "type": "object",
       "properties": {
         "id":      { "type": "string", "description": "Stable semantic id, e.g. 'img_chloroplast'." },
+        "topicId": { "type": "string", "description": "Stable id of the TOPIC thread this block belongs to. Reuse the same topicId for every block in one topic; mint a NEW topicId when the student moves to a new topic." },
         "prompt":  { "type": "string", "description": "What the image should depict." },
         "caption": { "type": "string" },
         "anchor":  { "$ref": "#/$defs/anchor" }
       },
-      "required": ["id", "prompt"]
+      "required": ["id", "topicId", "prompt"]
     }
   }
 }
@@ -250,7 +254,11 @@ For each returned `tool_call` the harness:
    reflects what was actually rendered.
 
 `id` is the join key across all three: the model's semantic id, the
-`commandQueue` idMap key, and the Redis key are the same string.
+`commandQueue` idMap key, and the Redis key are the same string. `topicId`
+groups blocks into topic threads: the harness uses it to detect when the model
+moves to a new topic (triggering Phase 3 consolidation for the prior topic).
+Each create tool carries `topicId` explicitly so topic detection never relies
+solely on idle timeouts.
 
 ---
 

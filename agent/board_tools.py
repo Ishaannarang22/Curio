@@ -90,6 +90,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Stable semantic id chosen by the model (e.g. 'topic_photosynthesis').",
                     },
+                    "topicId": {
+                        "type": "string",
+                        "description": (
+                            "Stable id of the TOPIC thread this block belongs to. "
+                            "Reuse the same topicId for every block in one topic; "
+                            "mint a NEW topicId when the student moves to a new topic."
+                        ),
+                    },
                     "title": {
                         "type": "string",
                         "description": "Block title shown in the header.",
@@ -100,7 +108,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "anchor": _ANCHOR_SCHEMA,
                 },
-                "required": ["id", "title", "markdown"],
+                "required": ["id", "topicId", "title", "markdown"],
                 "additionalProperties": False,
             },
         },
@@ -122,6 +130,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "id": {
                         "type": "string",
                         "description": "Stable semantic id for this flowchart block.",
+                    },
+                    "topicId": {
+                        "type": "string",
+                        "description": (
+                            "Stable id of the TOPIC thread this block belongs to. "
+                            "Reuse the same topicId for every block in one topic; "
+                            "mint a NEW topicId when the student moves to a new topic."
+                        ),
                     },
                     "title": {
                         "type": "string",
@@ -153,7 +169,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "anchor": _ANCHOR_SCHEMA,
                 },
-                "required": ["id", "title", "steps"],
+                "required": ["id", "topicId", "title", "steps"],
                 "additionalProperties": False,
             },
         },
@@ -175,6 +191,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "id": {
                         "type": "string",
                         "description": "Stable semantic id for this mind map block.",
+                    },
+                    "topicId": {
+                        "type": "string",
+                        "description": (
+                            "Stable id of the TOPIC thread this block belongs to. "
+                            "Reuse the same topicId for every block in one topic; "
+                            "mint a NEW topicId when the student moves to a new topic."
+                        ),
                     },
                     "center": {
                         "type": "string",
@@ -202,7 +226,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "anchor": _ANCHOR_SCHEMA,
                 },
-                "required": ["id", "center", "branches"],
+                "required": ["id", "topicId", "center", "branches"],
                 "additionalProperties": False,
             },
         },
@@ -225,6 +249,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Stable semantic id for this image block.",
                     },
+                    "topicId": {
+                        "type": "string",
+                        "description": (
+                            "Stable id of the TOPIC thread this block belongs to. "
+                            "Reuse the same topicId for every block in one topic; "
+                            "mint a NEW topicId when the student moves to a new topic."
+                        ),
+                    },
                     "prompt": {
                         "type": "string",
                         "description": "Text description of the image to generate.",
@@ -235,7 +267,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "anchor": _ANCHOR_SCHEMA,
                 },
-                "required": ["id", "prompt"],
+                "required": ["id", "topicId", "prompt"],
                 "additionalProperties": False,
             },
         },
@@ -447,14 +479,18 @@ async def execute_tool_call(
         _json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
     )
 
-    logger.debug(f"execute_tool_call: tool={tool_name!r} args={args}")
+    # Prefer the topicId the model explicitly supplied in the tool args; fall
+    # back to the harness-injected active_topic so legacy callers still work.
+    effective_topic: str = args.get("topicId") or active_topic
+
+    logger.debug(f"execute_tool_call: tool={tool_name!r} topic={effective_topic!r} args={args}")
 
     try:
         result = await _dispatch(
             tool_name, args,
             state=state,
             bridge=bridge,
-            active_topic=active_topic,
+            active_topic=effective_topic,
         )
         return {"tool": tool_name, "ok": True, **result}
     except Exception as exc:

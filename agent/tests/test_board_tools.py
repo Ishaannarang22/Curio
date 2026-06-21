@@ -4,8 +4,9 @@ Uses a FakeBridge (records sent {action,payload}) and a FakeState (in-memory
 dict implementing the M1 BoardState duck-typed interface). No real Redis or
 HTTP needed.
 
-pytest-asyncio is activated per-module via pytestmark (same pattern as
-test_board_state.py) to avoid touching pyproject.toml or any shared config.
+pytest-asyncio: async tests are marked individually with @pytest.mark.asyncio.
+The module-level pytestmark is intentionally NOT set to asyncio — that would
+emit PytestWarning for the synchronous schema-check tests at the top.
 """
 
 from __future__ import annotations
@@ -28,12 +29,6 @@ from board_tools import (
     _ORIGIN_Y,
     _COL_COUNT,
 )
-
-# ---------------------------------------------------------------------------
-# pytest-asyncio: activate asyncio mode for this module
-# ---------------------------------------------------------------------------
-
-pytestmark = pytest.mark.asyncio
 
 # ---------------------------------------------------------------------------
 # Fake helpers
@@ -141,11 +136,27 @@ def test_tool_schemas_anchor_optional():
             assert "anchor" not in params.get("required", [])
 
 
+def test_tool_schemas_topicId_required_on_create_tools():
+    """write_notes, make_flowchart, make_mindmap, add_image must require topicId."""
+    create_tools = {"write_notes", "make_flowchart", "make_mindmap", "add_image"}
+    for schema in TOOL_SCHEMAS:
+        fn = schema["function"]
+        if fn["name"] in create_tools:
+            params = fn["parameters"]
+            assert "topicId" in params["properties"], (
+                f"{fn['name']} is missing topicId property"
+            )
+            assert "topicId" in params.get("required", []), (
+                f"{fn['name']} must list topicId in required"
+            )
+
+
 # ---------------------------------------------------------------------------
 # write_notes
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_write_notes_sends_addMarkdown():
     bridge = FakeBridge()
     state = FakeState()
@@ -167,6 +178,7 @@ async def test_write_notes_sends_addMarkdown():
     assert "Light" in pkt["payload"]["markdown"]
 
 
+@pytest.mark.asyncio
 async def test_write_notes_upserts_state():
     bridge = FakeBridge()
     state = FakeState()
@@ -186,6 +198,7 @@ async def test_write_notes_upserts_state():
     assert block["shapeIds"] == ["notes_1"]
 
 
+@pytest.mark.asyncio
 async def test_write_notes_upsert_reuses_position():
     """Calling write_notes twice with the same id should reuse the stored position."""
     bridge = FakeBridge()
@@ -221,6 +234,7 @@ async def test_write_notes_upsert_reuses_position():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_make_flowchart_sends_addFlowchart():
     bridge = FakeBridge()
     state = FakeState()
@@ -245,6 +259,7 @@ async def test_make_flowchart_sends_addFlowchart():
     assert len(pkt["payload"]["steps"]) == 3
 
 
+@pytest.mark.asyncio
 async def test_make_flowchart_tracks_step_ids_as_shape_ids():
     """shapeIds must be the step ids so remove_block can delete each shape."""
     bridge = FakeBridge()
@@ -274,6 +289,7 @@ def result_from_block(block: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_make_mindmap_sends_addMindMap():
     bridge = FakeBridge()
     state = FakeState()
@@ -298,6 +314,7 @@ async def test_make_mindmap_sends_addMindMap():
     assert len(pkt["payload"]["branches"]) == 3
 
 
+@pytest.mark.asyncio
 async def test_make_mindmap_shape_ids_include_center_and_branches():
     """Center shape id = block_id + '__center'; branch ids = branch['id'] values."""
     bridge = FakeBridge()
@@ -322,6 +339,7 @@ async def test_make_mindmap_shape_ids_include_center_and_branches():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_add_image_sends_requestImage_only():
     """v1 stub: only requestImage, no resolveImage."""
     bridge = FakeBridge()
@@ -341,6 +359,7 @@ async def test_add_image_sends_requestImage_only():
     assert bridge.sent[0]["payload"]["prompt"] == "A diagram of a plant cell with labeled organelles"
 
 
+@pytest.mark.asyncio
 async def test_add_image_upserts_state():
     bridge = FakeBridge()
     state = FakeState()
@@ -361,6 +380,7 @@ async def test_add_image_upserts_state():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_highlight_sends_highlightNode():
     bridge = FakeBridge()
     state = FakeState()
@@ -374,6 +394,7 @@ async def test_highlight_sends_highlightNode():
     assert bridge.sent[0]["payload"]["id"] == "notes_kinetic"
 
 
+@pytest.mark.asyncio
 async def test_highlight_does_not_write_state():
     """highlight should never write to state (no upsert_block call)."""
     bridge = FakeBridge()
@@ -391,6 +412,7 @@ async def test_highlight_does_not_write_state():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_remove_block_sends_removeNode_per_child():
     """remove_block must send one removeNode per child shape id."""
     bridge = FakeBridge()
@@ -418,6 +440,7 @@ async def test_remove_block_sends_removeNode_per_child():
     assert removed_ids == {"step_a", "step_b", "step_c"}
 
 
+@pytest.mark.asyncio
 async def test_remove_block_removes_from_state():
     bridge = FakeBridge()
     state = FakeState()
@@ -439,6 +462,7 @@ async def test_remove_block_removes_from_state():
     assert await state.get_block("notes_x") is None
 
 
+@pytest.mark.asyncio
 async def test_remove_block_mindmap_children():
     """remove_block on a mind map must remove center + all branch shapes."""
     bridge = FakeBridge()
@@ -463,6 +487,7 @@ async def test_remove_block_mindmap_children():
     assert await state.get_block("mm_planets") is None
 
 
+@pytest.mark.asyncio
 async def test_remove_block_unknown_id_sends_one_removeNode():
     """If the block isn't in state, fall back to one removeNode with the block id."""
     bridge = FakeBridge()
@@ -482,6 +507,7 @@ async def test_remove_block_unknown_id_sends_one_removeNode():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_clear_board_sends_clearBoard():
     bridge = FakeBridge()
     state = FakeState()
@@ -499,6 +525,7 @@ async def test_clear_board_sends_clearBoard():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_resolve_placement_reuses_stored_position():
     state = FakeState()
     await state.upsert_block({
@@ -516,6 +543,7 @@ async def test_resolve_placement_reuses_stored_position():
     assert pos == {"x": 500.0, "y": 250.0}
 
 
+@pytest.mark.asyncio
 async def test_resolve_placement_anchor_near():
     state = FakeState()
     await state.upsert_block({
@@ -538,6 +566,7 @@ async def test_resolve_placement_anchor_near():
     assert pos["y"] == pytest.approx(100)
 
 
+@pytest.mark.asyncio
 async def test_resolve_placement_anchor_below():
     state = FakeState()
     await state.upsert_block({
@@ -559,6 +588,7 @@ async def test_resolve_placement_anchor_below():
     assert pos["y"] == pytest.approx(300 + _BLOCK_H + _GAP)
 
 
+@pytest.mark.asyncio
 async def test_resolve_placement_grid_packing_no_overlap():
     """Grid packing: placing N+1 blocks should produce non-overlapping positions."""
     state = FakeState()
@@ -595,6 +625,7 @@ async def test_resolve_placement_grid_packing_no_overlap():
         placed.append(candidate)
 
 
+@pytest.mark.asyncio
 async def test_resolve_placement_grid_wraps_to_next_row():
     """After _COL_COUNT columns the next block starts on a new row."""
     state = FakeState()
@@ -627,6 +658,7 @@ async def test_resolve_placement_grid_wraps_to_next_row():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_unknown_tool_returns_ok_false():
     bridge = FakeBridge()
     state = FakeState()
@@ -644,6 +676,7 @@ async def test_unknown_tool_returns_ok_false():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_arguments_as_json_string():
     import json
     bridge = FakeBridge()
