@@ -2,8 +2,10 @@ import {
   Editor,
   TLShapeId,
   createShapeId,
+  toRichText,
 } from '@tldraw/tldraw'
 import ELK from 'elkjs/lib/elk.bundled.js'
+import { shapeSupportsProp } from './safeShapeWrites'
 import { sanitizeMarkdown } from '../editor/markdown'
 import {
   forceSimulation,
@@ -64,7 +66,9 @@ export function addNote(
     const existing = getTLId(internalId)
     if (existing && editor.getShape(existing)) {
       // Upsert: update the existing note in place.
-      editor.updateShape({ id: existing, type: 'note', props: { text, color: color ?? 'yellow' } })
+      // tldraw's note shape stores text as structured richText (the legacy
+      // `text` prop was removed by the AddRichText migration), so convert here.
+      editor.updateShape({ id: existing, type: 'note', props: { richText: toRichText(text), color: color ?? 'yellow' } })
       return
     }
     setTLId(internalId, tlId)
@@ -74,7 +78,7 @@ export function addNote(
     type: 'note',
     x: pos.x,
     y: pos.y,
-    props: { text, color: color ?? 'yellow', size: 'm', font: 'sans' },
+    props: { richText: toRichText(text), color: color ?? 'yellow', size: 'm', font: 'sans' },
   })
   scheduleAppearAnimation(editor, tlId)
 }
@@ -428,10 +432,18 @@ export async function highlightNode(editor: Editor, internalId: string) {
     await sleep(420)
   }
 
-  // Pulse: set highlighted on, then off after 1.2s
-  editor.updateShape({ id: tlId, type: shape.type, props: { highlighted: true } })
-  await sleep(1200)
-  editor.updateShape({ id: tlId, type: shape.type, props: { highlighted: false } })
+  // Pulse for 1.2s. Custom shapes have a `highlighted` prop; built-in shapes
+  // (e.g. note) don't — for those, pulse via selection so highlight still works.
+  if (shapeSupportsProp(editor, shape.type, 'highlighted')) {
+    editor.updateShape({ id: tlId, type: shape.type, props: { highlighted: true } })
+    await sleep(1200)
+    editor.updateShape({ id: tlId, type: shape.type, props: { highlighted: false } })
+  } else {
+    const prev = editor.getSelectedShapeIds()
+    editor.setSelectedShapes([tlId])
+    await sleep(1200)
+    editor.setSelectedShapes(prev)
+  }
 }
 
 // ─── clearBoard ───────────────────────────────────────────────────────────────

@@ -107,14 +107,26 @@ def _resolve_board_brain_config() -> dict[str, Any] | None:
     """Resolve an OpenAI-compatible endpoint for the board brain.
 
     Order (independent of the speaking agent):
-      1. AI_GATEWAY_API_KEY  →  Claude Sonnet via Vercel AI Gateway
-      2. ZAI_API_KEY         →  GLM-5 turbo (fast tool-caller)
+      1. DEEPSEEK_API_KEY    →  DeepSeek V4 Pro (deepseek-v4-pro) via DeepSeek's API
+      2. AI_GATEWAY_API_KEY  →  Claude Sonnet via Vercel AI Gateway
+      3. ZAI_API_KEY         →  GLM-5 turbo (fast tool-caller)
       MUST NOT fall through to NVIDIA/Nemotron — too weak at tool calls.
     Returns None → brain disabled (Phase 1 still runs if bridge reachable).
 
     An optional "extra" dict is merged into the chat-completion request body
     (provider-specific knobs that aren't standard OpenAI params).
     """
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+    if deepseek_key:
+        return {
+            "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+            "api_key": deepseek_key,
+            # deepseek-v4-pro: native function-calling, OpenAI-compatible.
+            # (The legacy deepseek-chat/deepseek-reasoner aliases retire
+            # 2026-07-24.) No "thinking" knob: that's GLM-specific and
+            # DeepSeek rejects it; V4 Pro defaults to its non-think mode.
+            "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"),
+        }
     gateway_key = os.getenv("AI_GATEWAY_API_KEY")
     if gateway_key:
         return {

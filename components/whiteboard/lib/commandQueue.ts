@@ -1,5 +1,6 @@
 import { Editor } from '@tldraw/tldraw'
 import * as api from './boardApi'
+import { installSafeShapeWrites } from './safeShapeWrites'
 
 type Command = {
   action: string
@@ -37,6 +38,10 @@ let running = false
 let editorRef: Editor | null = null
 
 export function setEditor(editor: Editor) {
+  // Single choke point: make every board write prop-safe so a stray prop (e.g.
+  // an LLM tool call passing `highlighted`/`text` to a built-in note) degrades
+  // gracefully instead of throwing and killing the command queue.
+  installSafeShapeWrites(editor)
   editorRef = editor
 }
 
