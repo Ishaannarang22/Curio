@@ -415,3 +415,79 @@ class BoardState:
         except Exception as exc:
             logger.error(f"BoardState.clear failed: {exc}")
             sentry_sdk.capture_exception(exc)
+
+
+class InMemoryBoardState:
+    """In-process board state — no Redis, no network. Drop-in for BoardState.
+
+    Implements the same async interface, backed by a plain dict. Used for local
+    runs (the default; BOARD_STATE_BACKEND=memory) so the voice→board loop never
+    blocks on a Redis connect. State lives only for the process lifetime — no
+    cross-session persistence — which is fine for a live single-session demo.
+    """
+
+    def __init__(self, session: str = "default", **_ignored: Any) -> None:
+        validate_key_part(session, "session")
+        self._session = session
+        self._blocks: dict[str, dict[str, Any]] = {}
+        self._active_topic: str | None = None
+
+    async def connect(self) -> None:  # instant, no network
+        return None
+
+    async def aclose(self) -> None:
+        return None
+
+    async def set_active_topic(self, topic_id: str) -> None:
+        self._active_topic = topic_id
+
+    async def get_active_topic(self) -> str | None:
+        return self._active_topic
+
+    async def upsert_block(self, rec: dict[str, Any]) -> None:
+        block_id = rec.get("id")
+        if not isinstance(block_id, str) or not block_id:
+            return
+        self._blocks[block_id] = {
+            "id": block_id,
+            "topicId": rec.get("topicId", ""),
+            "type": rec.get("type", "notes"),
+            "title": str(rec.get("title", ""))[:_MAX_TITLE_CHARS],
+            "content": str(rec.get("content", ""))[:_MAX_CONTENT_CHARS],
+            "bbox": rec.get("bbox") or {"x": 0, "y": 0, "w": 0, "h": 0},
+            "shapeIds": rec.get("shapeIds") or [],
+            "updatedAt": rec.get("updatedAt") or time.time(),
+        }
+
+    async def get_block(self, block_id: str) -> dict[str, Any] | None:
+        rec = self._blocks.get(block_id)
+        return dict(rec) if rec else None
+
+    async def remove_block(self, block_id: str) -> None:
+        self._blocks.pop(block_id, None)
+
+    async def update_geometry(self, block_id: str, bbox: dict[str, float]) -> None:
+        rec = self._blocks.get(block_id)
+        if rec is not None:
+            rec["bbox"] = bbox
+            rec["updatedAt"] = time.time()
+
+    async def get_topic_blocks(self, topic_id: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._blocks.values() if r.get("topicId") == topic_id]
+
+    async def get_state_summary(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": r.get("id", ""),
+                "topicId": r.get("topicId", ""),
+                "type": r.get("type", ""),
+                "title": r.get("title", ""),
+                "summary": _summary_snippet(r.get("content")),
+                "bbox": r.get("bbox") or {"x": 0, "y": 0, "w": 0, "h": 0},
+            }
+            for r in self._blocks.values()
+        ]
+
+    async def clear(self) -> None:
+        self._blocks.clear()
+        self._active_topic = None

@@ -81,14 +81,14 @@ from loguru import logger
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from board_state import BoardState
+from board_state import BoardState, InMemoryBoardState
 from board_tools import TOOL_SCHEMAS, BridgePoster, execute_tool_call
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_SEND_URL = "http://localhost:8081/send"
+_DEFAULT_SEND_URL = "http://localhost:3000/api/board/send"
 _DEFAULT_REDIS_URL = "redis://localhost:6379"
 _LIVE_BLOCK_ID = "live"
 
@@ -224,8 +224,14 @@ class BoardWriter(FrameProcessor):
             self._state: Any = state
             self._owns_state = False
         else:
-            redis_url = os.getenv("REDIS_URL", _DEFAULT_REDIS_URL)
-            self._state = BoardState(redis_url=redis_url, session=session)
+            # Default to a local in-memory store so the voice→board loop never
+            # blocks on a Redis connect. Set BOARD_STATE_BACKEND=redis to use Redis.
+            backend = os.getenv("BOARD_STATE_BACKEND", "memory").lower()
+            if backend == "redis":
+                redis_url = os.getenv("REDIS_URL", _DEFAULT_REDIS_URL)
+                self._state = BoardState(redis_url=redis_url, session=session)
+            else:
+                self._state = InMemoryBoardState(session=session)
             self._owns_state = True
 
         # Serialization
