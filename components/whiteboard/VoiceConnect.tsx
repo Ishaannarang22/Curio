@@ -19,7 +19,7 @@
  * and a real microphone. This component compiles and renders correctly.
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { PipecatClient } from '@pipecat-ai/client-js'
 import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport'
 import { Orb, type OrbState } from './Orb'
@@ -157,6 +157,16 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
     }
     clientRef.current = null
     setStatus('idle')
+  }, [])
+
+  // Tear down any live agent connection when this component unmounts — e.g. when
+  // BoardCanvas remounts on a board switch (it's keyed by boardId). Without this,
+  // the old WebRTC/bot session leaks and keeps writing to the previous board.
+  useEffect(() => {
+    return () => {
+      void clientRef.current?.disconnect()
+      clientRef.current = null
+    }
   }, [])
 
   // ── Derived UI state ───────────────────────────────────────────────────────

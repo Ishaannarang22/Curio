@@ -25,7 +25,16 @@ export default function BoardCanvas({
   boardId: string;
   initialSnapshot: Json | null;
 }) {
+  // `key={boardId}` is load-bearing: tldraw's `onMount` (which binds the SSE
+  // session, hydrates the snapshot, wires autosave) runs ONCE per mount. Without
+  // a board-scoped key, client-side navigation between boards reuses the same
+  // instance, so every binding — including the voice session — stays pinned to
+  // the first board. Keying by id forces a full teardown + fresh mount on switch.
   return (
-    <WhiteboardApp boardId={boardId} initialSnapshot={initialSnapshot} />
+    <WhiteboardApp
+      key={boardId}
+      boardId={boardId}
+      initialSnapshot={initialSnapshot}
+    />
   );
 }
