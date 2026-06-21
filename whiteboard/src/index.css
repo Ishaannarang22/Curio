@@ -13,7 +13,12 @@ html, body, #root {
   font-family: 'Inter', system-ui, sans-serif;
 }
 
-/* Shape appear animation */
+/* Shape appear animation — fade + slight scale-in.
+   IMPORTANT: this must NOT be applied to `.tl-shape`. tldraw positions every
+   shape with `transform: translate(x,y)` on `.tl-shape`; animating `transform`
+   there (even just scale) clobbers the translate and snaps the shape to the
+   page origin. We apply it to `.tl-html-container`, a child element that
+   carries no positioning transform, so scaling is safe. */
 @keyframes shape-appear {
   from {
     opacity: 0;
@@ -31,9 +36,9 @@ html, body, #root {
   100% { background-position: 200% 0; }
 }
 
-/* Apply appear animation to all tldraw shape containers */
-.tl-shape {
-  animation: shape-appear 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+/* Apply appear animation to the custom-shape content containers only. */
+.tl-html-container {
+  animation: shape-appear 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
 /* Override tldraw toolbar styles to feel minimal */

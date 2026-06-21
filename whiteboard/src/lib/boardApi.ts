@@ -8,7 +8,6 @@ import {
   forceSimulation,
   forceLink,
   forceManyBody,
-  forceCenter,
   forceCollide,
   SimulationNodeDatum,
   SimulationLinkDatum,
@@ -389,6 +388,12 @@ export async function addMindMap(
 ) {
   const centerId = '__mindmap_center__'
 
+  // Anchor the whole map at the current viewport center so it's never
+  // laid out off-screen near page origin (0,0).
+  const vp = editor.getViewportPageBounds()
+  const anchorX = vp.x + vp.w / 2
+  const anchorY = vp.y + vp.h / 2
+
   // Create center if needed
   let centerTlId = getTLId(centerId)
   if (!centerTlId || !editor.getShape(centerTlId)) {
@@ -397,8 +402,8 @@ export async function addMindMap(
     editor.createShape({
       id: centerTlId,
       type: 'mind-map-node',
-      x: 0,
-      y: 0,
+      x: anchorX - 80,
+      y: anchorY - 26,
       props: { label: centerLabel, isCenter: true, w: 160, h: 52, highlighted: false },
     })
     scheduleAppearAnimation(editor, centerTlId)
@@ -406,7 +411,8 @@ export async function addMindMap(
     editor.updateShape({ id: centerTlId, type: 'mind-map-node', props: { label: centerLabel } })
   }
 
-  // Create branch nodes that don't exist yet
+  // Create branch nodes that don't exist yet, seeded near the center so the
+  // force sim spreads them outward from a sensible starting point.
   for (const branch of branches) {
     let branchTlId = getTLId(branch.id)
     if (!branchTlId || !editor.getShape(branchTlId)) {
@@ -415,8 +421,8 @@ export async function addMindMap(
       editor.createShape({
         id: branchTlId,
         type: 'mind-map-node',
-        x: 0,
-        y: 0,
+        x: anchorX - 70 + (Math.random() * 80 - 40),
+        y: anchorY - 22 + (Math.random() * 80 - 40),
         props: { label: branch.label, isCenter: false, w: 140, h: 44, highlighted: false },
       })
       scheduleAppearAnimation(editor, branchTlId)
@@ -426,6 +432,22 @@ export async function addMindMap(
 
   // Run d3-force layout
   await runD3ForceLayout(editor, centerId, branches.map((b) => b.id))
+
+  // Bring the whole structure comfortably into view.
+  await zoomToContent(editor)
+}
+
+// Gently fit all shapes into the viewport with a smooth animation.
+// Caps zoom at 100% so small structures aren't blown up awkwardly.
+async function zoomToContent(editor: Editor) {
+  const bounds = editor.getCurrentPageBounds()
+  if (!bounds) return
+  editor.zoomToBounds(bounds, {
+    animation: { duration: 400 },
+    inset: 80,
+    targetZoom: Math.min(1, editor.getViewportScreenBounds().w / (bounds.w + 160)),
+  })
+  await sleep(420)
 }
 
 async function runD3ForceLayout(
@@ -451,31 +473,36 @@ async function runD3ForceLayout(
   const links: FLink[] = branchIds.map((id) => ({
     source: centerId,
     target: id,
-    distance: 200,
   }))
 
-  await new Promise<void>((resolve) => {
-    const sim = forceSimulation<FNode>(nodes)
-      .force('link', forceLink<FNode, FLink>(links).id((d) => d.id).distance(200).strength(0.8))
-      .force('charge', forceManyBody().strength(-300))
-      .force('center', forceCenter(cx, cy))
-      .force('collide', forceCollide(90))
-      .alphaDecay(0.05)
+  // Settle the simulation SYNCHRONOUSLY rather than animating every tick.
+  // A fixed center node anchors the layout, so no forceCenter is needed
+  // (forceCenter would re-center the centroid each tick and fight the fixed
+  // node, causing the whole cloud to drift). Charge repels branches apart,
+  // link springs them to the center, collide prevents overlap.
+  const sim = forceSimulation<FNode>(nodes)
+    .force('link', forceLink<FNode, FLink>(links).id((d) => d.id).distance(180).strength(0.9))
+    .force('charge', forceManyBody().strength(-600))
+    .force('collide', forceCollide(85))
+    .stop()
 
-    sim.on('tick', () => {
-      // Animate each non-center node to its new position
-      for (const node of nodes) {
-        if (node.id === centerId) continue
-        const tlId = getTLId(node.id)
-        if (!tlId) continue
-        const shape = editor.getShape(tlId)
-        if (!shape) continue
-        editor.updateShape({ id: tlId, type: shape.type, x: (node.x ?? 0) - 70, y: (node.y ?? 0) - 22 })
-      }
+  // Tick to convergence off-screen (deterministic, no visual thrash).
+  const ticks = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()))
+  for (let i = 0; i < ticks; i++) sim.tick()
+
+  // Animate every branch to its settled position once, over ~400ms.
+  const partials = nodes
+    .filter((n) => n.id !== centerId)
+    .map((n) => {
+      const tlId = getTLId(n.id)
+      if (!tlId) return null
+      return { id: tlId, type: 'mind-map-node' as const, x: (n.x ?? cx) - 70, y: (n.y ?? cy) - 22 }
     })
-
-    sim.on('end', () => resolve())
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+  editor.animateShapes(partials, {
+    animation: { duration: 400, easing: (t) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t) },
   })
+  await sleep(420)
 }
 
 // ─── addFlowchart ─────────────────────────────────────────────────────────────
@@ -513,6 +540,9 @@ export async function addFlowchart(
   })
 
   await runElkLayout(editor, steps)
+
+  // Bring the whole flowchart comfortably into view.
+  await zoomToContent(editor)
 }
 
 async function runElkLayout(
