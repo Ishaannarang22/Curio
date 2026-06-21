@@ -292,7 +292,13 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
         base_url = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/")
         api_key = os.getenv("ZAI_API_KEY", "")
         model = os.getenv("ZAI_MODEL", "glm-5.1")
-        logger.info(f"LLM: OpenAI-compatible ({base_url}), model={model}")
+        # GLM reasons by default, leaking chain-of-thought into the spoken reply
+        # and adding seconds of dead air before the first token. Voice needs the
+        # instinctive answer — disable thinking. `thinking` is a non-standard
+        # param, so it rides in extra_body (the OpenAI SDK rejects unknown
+        # top-level kwargs).
+        extra = {"extra_body": {"thinking": {"type": "disabled"}}}
+        logger.info(f"LLM: OpenAI-compatible ({base_url}), model={model}, thinking off")
 
     sentry_sdk.set_tag("llm.model", model)
     return OpenAILLMService(

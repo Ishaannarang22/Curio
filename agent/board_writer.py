@@ -103,7 +103,7 @@ _IDLE_TIMEOUT_S = 8.0
 # LLM config resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_board_brain_config() -> dict[str, str] | None:
+def _resolve_board_brain_config() -> dict[str, Any] | None:
     """Resolve an OpenAI-compatible endpoint for the board brain.
 
     Order (independent of the speaking agent):
@@ -111,6 +111,9 @@ def _resolve_board_brain_config() -> dict[str, str] | None:
       2. ZAI_API_KEY         →  GLM-5 turbo (fast tool-caller)
       MUST NOT fall through to NVIDIA/Nemotron — too weak at tool calls.
     Returns None → brain disabled (Phase 1 still runs if bridge reachable).
+
+    An optional "extra" dict is merged into the chat-completion request body
+    (provider-specific knobs that aren't standard OpenAI params).
     """
     gateway_key = os.getenv("AI_GATEWAY_API_KEY")
     if gateway_key:
@@ -125,6 +128,10 @@ def _resolve_board_brain_config() -> dict[str, str] | None:
             "base_url": os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/"),
             "api_key": zai_key,
             "model": os.getenv("CALLER_MODEL") or os.getenv("ZAI_MODEL", "glm-5-turbo"),
+            # GLM reasons by default (~150 reasoning tokens/turn), leaking its
+            # chain-of-thought into `content` and tripling latency. The board
+            # brain only needs tool calls, so disable thinking outright.
+            "extra": {"thinking": {"type": "disabled"}},
         }
     # NVIDIA/Nemotron deliberately excluded — poor tool-call reliability.
     return None
@@ -566,17 +573,20 @@ class BoardWriter(FrameProcessor):
         """
         assert self._config is not None
         try:
+            body: dict[str, Any] = {
+                "model": self._config["model"],
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "temperature": 0.2,
+                "max_tokens": 2000,
+            }
+            # Provider-specific knobs (e.g. GLM's thinking switch).
+            body.update(self._config.get("extra") or {})
             resp = await self._http.post(
                 f"{self._config['base_url'].rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {self._config['api_key']}"},
-                json={
-                    "model": self._config["model"],
-                    "messages": messages,
-                    "tools": tools,
-                    "tool_choice": "auto",
-                    "temperature": 0.2,
-                    "max_tokens": 2000,
-                },
+                json=body,
                 timeout=25,
             )
             resp.raise_for_status()
