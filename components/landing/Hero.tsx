@@ -37,19 +37,20 @@ export default function Hero() {
 
       <motion.span className="lp-eyebrow" {...rise(0.15)}>
         <span className="lp-eyebrow__dot" aria-hidden />
-        Voice-first study companion
+        Voice-based agent harness for brainstorming
       </motion.span>
 
       <motion.h1 className="lp-hero__title" {...rise(0.25)}>
-        Talk through anything.
+        Brainstorm out loud.
         <br />
-        <span className="lp-grad">Watch it become a board.</span>
+        <span className="lp-grad">Watch the ideas connect.</span>
       </motion.h1>
 
       <motion.p className="lp-hero__sub" {...rise(0.38)}>
-        Curio is a voice-first note-taker. Explain a topic out loud, the way you
-        would to a friend — and a living whiteboard of structured notes,
-        diagrams, and study artifacts builds itself in real time.
+        Curio is a voice-based agent harness for brainstorming. Think out loud,
+        the way ideas actually arrive — and a team of agents listens, structures,
+        and connects your thinking into a living board of maps, notes, and
+        diagrams in real time.
       </motion.p>
 
       <motion.div className="lp-hero__cta" {...rise(0.5)}>
@@ -63,7 +64,7 @@ export default function Hero() {
       </motion.div>
 
       <motion.p className="lp-hero__note" {...rise(0.6)}>
-        No typing required. The talking is the studying.
+        No typing, no blank page. Just talk, and the thinking takes shape.
       </motion.p>
     </header>
   )

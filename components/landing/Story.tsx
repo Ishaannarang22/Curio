@@ -22,13 +22,14 @@ export default function Story() {
         </Reveal>
         <Reveal delay={0.05}>
           <h2 id="feynman" className="lp-feynman">
-            If you can&apos;t explain it simply, <em>you don&apos;t understand it yet.</em>
+            Your best ideas show up <em>when you&apos;re talking, not typing.</em>
           </h2>
         </Reveal>
         <Reveal delay={0.1}>
           <p className="lp-feynman__by">
-            Curio is an elicitation tool, not a transcription tool. The act of
-            explaining is the studying — the notes are just the byproduct.
+            Curio is a thinking tool, not a transcription tool. You talk; a
+            harness of agents does the structuring — so you never lose the thread
+            to formatting.
           </p>
         </Reveal>
       </section>
@@ -47,17 +48,17 @@ export default function Story() {
             </Reveal>
             <Reveal delay={0.1}>
               <p className="lp-feature__body">
-                You ramble the way thoughts actually arrive — out of order, half
-                formed. Curio captures the raw stream and continuously
-                restructures it into a clean board: a mind map here, an
-                explanation card there, a diagram when a picture helps.
+                You riff the way ideas actually arrive — out of order, half
+                formed, branching. Curio captures the raw stream and a team of
+                agents continuously restructures it into a clean board: a mind
+                map here, an idea card there, a diagram when a picture helps.
               </p>
             </Reveal>
             <Reveal delay={0.15}>
               <p className="lp-feature__body">
                 The board moves while you talk, and that&apos;s the point. Your
-                train of thought lives in the speaking — the board is the
-                reference you glance at, not the thing you fight with.
+                train of thought lives in the speaking — the board is the canvas
+                your ideas land on, not a tool you fight with.
               </p>
             </Reveal>
           </div>
@@ -73,25 +74,25 @@ export default function Story() {
         <div className="lp-feature lp-feature--rev">
           <div className="lp-feature__copy">
             <Reveal>
-              <p className="lp-kicker lp-kicker--teal">The companion</p>
+              <p className="lp-kicker lp-kicker--teal">The harness</p>
             </Reveal>
             <Reveal delay={0.05}>
               <h3 id="voice" className="lp-feature__title">
-                A companion that listens more than it talks.
+                A harness of agents behind one voice.
               </h3>
             </Reveal>
             <Reveal delay={0.1}>
               <p className="lp-feature__body">
-                Curio isn&apos;t chatty. It asks a clarifying question only when
-                one is actually warranted, and it waits for a natural pause to
-                raise it — never cutting in mid-thought.
+                Curio isn&apos;t one chatbot. Behind the single voice,
+                specialized agents listen, classify, structure, draw, and connect
+                — each handling a slice of turning loose talk into a board.
               </p>
             </Reveal>
             <Reveal delay={0.15}>
               <p className="lp-feature__body">
                 Voice is the whole interface. No menus, no formatting, no
                 wrestling a cursor. Just the fastest, least-resistive way to get
-                what&apos;s in your head onto a page.
+                what&apos;s in your head onto the canvas.
               </p>
             </Reveal>
           </div>
@@ -111,22 +112,20 @@ export default function Story() {
             </Reveal>
             <Reveal delay={0.05}>
               <h3 id="gaps" className="lp-feature__title">
-                It surfaces what you don&apos;t know — instead of hiding it.
+                It surfaces the open threads — instead of papering over them.
               </h3>
             </Reveal>
             <Reveal delay={0.1}>
               <p className="lp-feature__body">
-                When you hit something you can&apos;t explain, Curio doesn&apos;t
-                quietly fill it in with its own knowledge. The gap stays on the
-                board as an open question — a visible &ldquo;you don&apos;t
-                understand this yet&rdquo; flag.
+                When you hit something unresolved, Curio doesn&apos;t quietly
+                invent an answer. The open question stays on the board as a live
+                thread — a visible &ldquo;this still needs thought&rdquo; flag.
               </p>
             </Reveal>
             <Reveal delay={0.15}>
               <p className="lp-feature__body">
-                That&apos;s what protects the Feynman integrity: the
-                understanding has to be yours, not the bot&apos;s. Your gaps
-                become your study list.
+                That keeps the ideas yours, not the model&apos;s. Your open
+                threads become your next moves.
               </p>
             </Reveal>
           </div>
@@ -145,8 +144,8 @@ export default function Story() {
 function LoopFigure() {
   const steps = [
     { n: '1', label: 'You speak', desc: 'Raw, unstructured thinking out loud', bg: '#3b82f6' },
-    { n: '2', label: 'Curio listens', desc: 'Captures the stream, infers intent', bg: '#2dd4bf' },
-    { n: '3', label: 'Board restructures', desc: 'Notes, maps, diagrams, in real time', bg: '#8b5cf6' },
+    { n: '2', label: 'Agents listen', desc: 'Capture the stream, infer intent', bg: '#2dd4bf' },
+    { n: '3', label: 'Board restructures', desc: 'Maps, notes, diagrams, in real time', bg: '#8b5cf6' },
   ]
   return (
     <div className="lp-loop">

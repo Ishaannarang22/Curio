@@ -2,9 +2,9 @@ import type { Metadata } from 'next'
 import Landing from '@/components/landing/Landing'
 
 export const metadata: Metadata = {
-  title: 'Curio — Talk through anything. Watch it become a board.',
+  title: 'Curio — Brainstorm out loud. Watch the ideas connect.',
   description:
-    'Curio is a voice-first study companion. Explain a topic out loud and a living whiteboard of structured notes, diagrams, and study artifacts builds itself in real time.',
+    'Curio is a voice-based agent harness for brainstorming. Think out loud and a team of agents structures and connects your ideas into a living board of maps, notes, and diagrams in real time.',
 }
 
 export default function Home() {

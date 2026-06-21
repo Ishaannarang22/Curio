@@ -35,12 +35,12 @@ const P = {
   image: { x: 250, y: 270 },
 }
 
-/* Captions cycle to suggest the student thinking out loud. */
+/* Captions cycle to suggest someone brainstorming out loud. */
 const CAPTIONS = [
-  'So, photosynthesis turns light into chemical energy…',
-  'There are two stages — the light reactions and the Calvin cycle…',
-  'Wait, I\'m not totally sure how ATP feeds the Calvin cycle.',
-  'It happens in the chloroplast, in the thylakoid membrane.',
+  'Okay, so the idea is an app for finding hiking trails…',
+  'It needs offline maps, and maybe a solo-safety check-in…',
+  'Hmm — not sure how we\'d source the trail data.',
+  'Routes could be crowd-sourced from other hikers.',
 ]
 
 /* Timeline (seconds). Tuned to feel like crystallizing thought, then loop. */
@@ -143,7 +143,7 @@ export default function BoardScene() {
   const d = (t: number) => (reduce ? 0 : t)
 
   return (
-    <div className="lp-scene" role="img" aria-label="A self-assembling Curio board: a mind map about photosynthesis, a sticky note, an explanation card, and an image card.">
+    <div className="lp-scene" role="img" aria-label="A self-assembling Curio board: a mind map of a hiking-trail app idea, a note, an idea card, and an image card.">
       <div className="lp-scene__grid" />
       <div className="lp-scene__tag">
         <span className="lp-scene__live" />
@@ -160,16 +160,16 @@ export default function BoardScene() {
         </svg>
 
         {/* Mind map */}
-        <Pill center point={P.center} tone="purple" label="Photosynthesis" delay={d(TL.center)} />
-        <Pill point={P.branchPhotosynthesis} tone="purple" label="Light reactions" delay={d(TL.bPhoto)} />
-        <Pill point={P.branchLight} tone="blue" label="Chloroplast" delay={d(TL.bLight)} />
-        <Pill point={P.branchCalvin} tone="purple" label="Calvin cycle" delay={d(TL.bCalvin)} />
+        <Pill center point={P.center} tone="purple" label="Trail app" delay={d(TL.center)} />
+        <Pill point={P.branchPhotosynthesis} tone="purple" label="Offline maps" delay={d(TL.bPhoto)} />
+        <Pill point={P.branchLight} tone="blue" label="Solo check-in" delay={d(TL.bLight)} />
+        <Pill point={P.branchCalvin} tone="purple" label="Crowd-sourced routes" delay={d(TL.bCalvin)} />
 
         {/* Sticky note */}
         <motion.div className="lp-node" style={{ ...pct(P.note), transform: 'translate(-50%, -50%)' }} {...springIn(d(TL.note))}>
           <div className="lp-note">
             <div className="lp-note__eyebrow">Note</div>
-            <div className="lp-note__text">Glucose stores the captured energy for the cell.</div>
+            <div className="lp-note__text">Could partner with park services for trail data.</div>
           </div>
         </motion.div>
 
@@ -199,7 +199,7 @@ export default function BoardScene() {
                 />
               )}
               <div className="lp-image__chip">
-                <Image /> chloroplast diagram
+                <Image /> route map mock
               </div>
             </div>
           </div>

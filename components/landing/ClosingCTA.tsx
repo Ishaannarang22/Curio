@@ -9,9 +9,9 @@ export default function ClosingCTA() {
     <>
       <section className="lp-shell">
         <Reveal className="lp-cta">
-          <h2 className="lp-cta__title">Your next study session starts with a sentence.</h2>
+          <h2 className="lp-cta__title">Your next big idea starts with a sentence.</h2>
           <p className="lp-cta__sub">
-            Open a board, start talking, and watch your understanding take shape.
+            Open a board, start talking, and watch your thinking take shape.
           </p>
           <div className="lp-cta__actions">
             <Link href="/signup" className="lp-btn lp-btn--primary lp-btn--lg">
@@ -31,7 +31,7 @@ export default function ClosingCTA() {
             <span className="lp-brand__mark" aria-hidden />
             Curio
           </div>
-          <div className="lp-footer__copy">The talking is the studying.</div>
+          <div className="lp-footer__copy">The talking is the thinking.</div>
           <nav className="lp-footer__links" aria-label="Footer">
             <Link href="/signup">Get started</Link>
             <Link href="/login">Log in</Link>
