@@ -278,12 +278,15 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
 
     if deepseek_key:
-        # DeepSeek (OpenAI-compatible). `deepseek-v4-flash` is the fast,
-        # non-reasoning model — the instinctive reply voice needs.
+        # DeepSeek (OpenAI-compatible). deepseek-v4 reasons by default, which
+        # puts the reply in `reasoning_content` and leaves `content` EMPTY —
+        # the bot connects but speaks nothing. Disable thinking so the spoken
+        # text comes back in `content` (and to kill the reasoning latency).
         base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         api_key = deepseek_key
         model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-        logger.info(f"LLM: DeepSeek ({base_url}), model={model}")
+        extra = {"extra_body": {"thinking": {"type": "disabled"}}}
+        logger.info(f"LLM: DeepSeek ({base_url}), model={model}, thinking off")
     elif gateway_key:
         model = _allowed_model(payload_model, os.getenv("AI_GATEWAY_MODEL") or "openai/gpt-4o-mini")
         base_url = "https://ai-gateway.vercel.sh/v1"

@@ -123,9 +123,10 @@ def _resolve_board_brain_config() -> dict[str, Any] | None:
             "api_key": deepseek_key,
             # deepseek-v4-flash: fast native function-calling, OpenAI-compatible.
             # (The legacy deepseek-chat/deepseek-reasoner aliases retire
-            # 2026-07-24.) No "thinking" knob: that's GLM-specific and
-            # DeepSeek rejects it; V4 defaults to its non-think mode.
+            # 2026-07-24.) V4 reasons by default — empty content + tripled
+            # latency — so disable thinking; the board brain only needs the call.
             "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            "extra": {"thinking": {"type": "disabled"}},
         }
     gateway_key = os.getenv("AI_GATEWAY_API_KEY")
     if gateway_key:
