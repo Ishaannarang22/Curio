@@ -14,6 +14,10 @@ Sentry.init({
 
   enableLogs: true,
   debug: false,
+
+  // Send user PII (IP, request/user context) for richer observability.
+  // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
+  sendDefaultPii: true,
 });
 
 // Required for navigation/route-change instrumentation in the App Router.
