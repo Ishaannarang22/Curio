@@ -1,16 +1,20 @@
 "use client";
 
 /**
- * Magic-link auth form, shared by /login and /signup.
+ * Auth form shared by /login and /signup.
  *
- * Passwordless flow: `supabase.auth.signInWithOtp` with `emailRedirectTo`
- * pointing at our PKCE callback. The callback then runs
- * `exchangeCodeForSession` and redirects to `next` (default /boards).
+ * PRIMARY: email + password.
+ *   - login  → `supabase.auth.signInWithPassword` → hard-nav to `next`.
+ *   - signup → `supabase.auth.signUp` (+ display_name in user metadata).
+ *       · email confirmation OFF → a session comes back → straight to `next`.
+ *       · email confirmation ON  → no session → show "confirm your email".
  *
- * `mode="signup"` additionally captures a display name (stored in user
- * metadata via `options.data.display_name`). Both modes create the user if it
- * doesn't exist (`shouldCreateUser: true`) so a magic link "just works" for
- * first-time and returning users alike.
+ * SECONDARY: magic link (kept as an option). `signInWithOtp` with
+ * `emailRedirectTo` → our PKCE callback runs `exchangeCodeForSession`.
+ *
+ * On password success we do a full navigation (`window.location.assign`) rather
+ * than a client push so the proxy/server picks up the freshly-written session
+ * cookie on the next request.
  *
  * Visual language: the Orb hero + the .auth-* classes in app/auth/auth.css.
  */
@@ -22,6 +26,8 @@ import { Orb, type OrbState } from "@/components/whiteboard/Orb";
 import { createClient } from "@/lib/supabase/client";
 
 type Mode = "login" | "signup";
+type Status = "idle" | "working";
+type Sent = { kind: "magic" | "confirm"; email: string } | null;
 
 interface AuthFormProps {
   mode: Mode;
@@ -36,15 +42,14 @@ function safeNext(raw: string | null): string {
 const COPY: Record<Mode, { title: string; subtitle: string; cta: string }> = {
   login: {
     title: "Welcome back",
-    subtitle:
-      "Enter your email and we'll send a magic link — no password to remember.",
-    cta: "Send magic link",
+    subtitle: "Log in with your email and password.",
+    cta: "Log in",
   },
   signup: {
     title: "Create your account",
     subtitle:
-      "Talk through any topic out loud and watch Curio build the board with you.",
-    cta: "Send magic link",
+      "Think out loud and watch a harness of agents build the board with you.",
+    cta: "Create account",
   },
 };
 
@@ -55,26 +60,89 @@ export function AuthForm({ mode }: AuthFormProps) {
   const callbackError = searchParams.get("error");
 
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [status, setStatus] = useState<Status>("idle");
+  const [sent, setSent] = useState<Sent>(null);
   const [error, setError] = useState<string | null>(null);
 
   const copy = COPY[mode];
-  const orbState: OrbState = status === "sending" ? "connecting" : "idle";
+  const orbState: OrbState = status === "working" ? "connecting" : "idle";
+  const working = status === "working";
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  // ── Primary: email + password ──────────────────────────────────────────────
+  async function handlePassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (status === "sending") return;
-
+    if (working) return;
     setError(null);
-    setStatus("sending");
+    setStatus("working");
+
+    try {
+      const supabase = createClient();
+      const cleanEmail = email.trim();
+
+      if (mode === "login") {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+        if (signInError) {
+          setError(signInError.message);
+          setStatus("idle");
+          return;
+        }
+        window.location.assign(next);
+        return;
+      }
+
+      // signup
+      const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          emailRedirectTo,
+          data: { display_name: displayName.trim() },
+        },
+      });
+      if (signUpError) {
+        setError(signUpError.message);
+        setStatus("idle");
+        return;
+      }
+
+      // Confirmation OFF → session present → go straight in.
+      if (data.session) {
+        window.location.assign(next);
+        return;
+      }
+      // Confirmation ON → must verify email first.
+      setSent({ kind: "confirm", email: cleanEmail });
+      setStatus("idle");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Something went wrong. Try again.",
+      );
+      setStatus("idle");
+    }
+  }
+
+  // ── Secondary: magic link ──────────────────────────────────────────────────
+  async function handleMagicLink() {
+    if (working) return;
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError("Enter your email first, then request a magic link.");
+      return;
+    }
+    setError(null);
+    setStatus("working");
 
     try {
       const supabase = createClient();
       const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
-
       const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
+        email: cleanEmail,
         options: {
           emailRedirectTo,
           shouldCreateUser: true,
@@ -83,14 +151,13 @@ export function AuthForm({ mode }: AuthFormProps) {
             : {}),
         },
       });
-
       if (otpError) {
         setError(otpError.message);
         setStatus("idle");
         return;
       }
-
-      setStatus("sent");
+      setSent({ kind: "magic", email: cleanEmail });
+      setStatus("idle");
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong. Try again.",
@@ -109,21 +176,33 @@ export function AuthForm({ mode }: AuthFormProps) {
           ariaLabel="Curio"
         />
 
-        {status === "sent" ? (
+        {sent ? (
           <div className="auth-sent">
             <div className="auth-wordmark">Curio</div>
-            <div className="auth-sent__title">Check your inbox</div>
+            <div className="auth-sent__title">
+              {sent.kind === "magic" ? "Check your inbox" : "Confirm your email"}
+            </div>
             <p className="auth-sent__body">
-              We sent a magic link to{" "}
-              <span className="auth-sent__email">{email.trim()}</span>. Open it
-              on this device to finish signing in.
+              {sent.kind === "magic" ? (
+                <>
+                  We sent a magic link to{" "}
+                  <span className="auth-sent__email">{sent.email}</span>. Open it
+                  on this device to finish signing in.
+                </>
+              ) : (
+                <>
+                  We sent a confirmation link to{" "}
+                  <span className="auth-sent__email">{sent.email}</span>. Click it
+                  to activate your account, then log in.
+                </>
+              )}
             </p>
             <button
               type="button"
               className="auth-ghost-btn"
-              onClick={() => setStatus("idle")}
+              onClick={() => setSent(null)}
             >
-              Use a different email
+              Back
             </button>
           </div>
         ) : (
@@ -134,7 +213,7 @@ export function AuthForm({ mode }: AuthFormProps) {
               <p className="auth-subtitle">{copy.subtitle}</p>
             </div>
 
-            <form className="auth-form" onSubmit={handleSubmit} noValidate>
+            <form className="auth-form" onSubmit={handlePassword} noValidate>
               {mode === "signup" && (
                 <div className="auth-field">
                   <label className="auth-label" htmlFor="auth-name">
@@ -171,20 +250,46 @@ export function AuthForm({ mode }: AuthFormProps) {
                 />
               </div>
 
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="auth-password">
+                  Password
+                </label>
+                <input
+                  id="auth-password"
+                  className="auth-input"
+                  type="password"
+                  autoComplete={
+                    mode === "login" ? "current-password" : "new-password"
+                  }
+                  placeholder={
+                    mode === "signup" ? "At least 6 characters" : "Your password"
+                  }
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+
               {(error ?? callbackError) && (
                 <div className="auth-error" role="alert">
                   {error ?? callbackError}
                 </div>
               )}
 
-              <button
-                type="submit"
-                className="auth-submit"
-                disabled={status === "sending"}
-              >
-                {status === "sending" ? "Sending…" : copy.cta}
+              <button type="submit" className="auth-submit" disabled={working}>
+                {working ? "Working…" : copy.cta}
               </button>
             </form>
+
+            <button
+              type="button"
+              className="auth-ghost-btn auth-magic-btn"
+              onClick={handleMagicLink}
+              disabled={working}
+            >
+              Prefer a magic link? Email me one instead
+            </button>
 
             <div className="auth-foot">
               {mode === "login" ? (

@@ -294,6 +294,18 @@
     background 0.2s ease;
 }
 
+/* Magic-link secondary action: borderless, sits under the primary submit. */
+.auth-magic-btn {
+  width: 100%;
+  border-color: transparent;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.auth-magic-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .auth-ghost-btn:hover {
   border-color: rgba(255, 255, 255, 0.32);
   color: #fff;
