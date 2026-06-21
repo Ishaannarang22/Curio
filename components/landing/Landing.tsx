@@ -12,6 +12,9 @@ import Link from 'next/link'
 import Hero from './Hero'
 import BoardScene from './BoardScene'
 import FeynmanSection from './sections/FeynmanSection'
+import LoopSection from './sections/LoopSection'
+import VoiceSection from './sections/VoiceSection'
+import GapsSection from './sections/GapsSection'
 import ClosingCTA from './ClosingCTA'
 import './landing.css'
 
@@ -62,6 +65,9 @@ export default function Landing() {
         </section>
 
         <FeynmanSection />
+        <LoopSection />
+        <VoiceSection />
+        <GapsSection />
 
         <ClosingCTA />
       </main>
