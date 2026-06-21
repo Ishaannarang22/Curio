@@ -126,4 +126,7 @@ flashcards.
 | 12 | Structuring Agent infers form from content; student can override by voice | Least-resistive default with an escape hatch. |
 | 13 | Spawned artifacts are functional but board-only | Interactive study bits without building a separate study app. |
 | 14 | Concurrency: different spaces + both read immutable raw | Solves spatial collisions AND dangling-reference races. |
-| 15 | Voice agent is an existing component to integrate; contract TBD | Owner already built it. |
+| 15 | Voice agent = **our fork** of the pulse (Pipecat 1.3.0) scaffold in `agent/` — reference/starting point we own, not an external integration | Code read; STT=Deepgram Flux, TTS=Cartesia Sonic-3, OpenAI-compatible brain, RTVI caption stream, Supabase persistence. We rewrite it freely. See implementation.md §3. |
+| 16 | Persistence = **Supabase** (Postgres + PostgREST), `messages(conversation_id, role, content)`, RLS via end-user JWT | The voice agent already writes turns this way; reuse it as the durable transcript store. |
+| 17 | Observability = **Sentry** across web (`@sentry/nextjs`) + agent (`sentry_sdk`), shared DSN; our agents traced as spans with token usage | One project = end-to-end traceable study session. See implementation.md §4. |
+| 18 | Talk-back owner = **Curio (our Inference Layer)**, not pulse's per-turn LLM; pulse is reduced to STT/TTS transport | Curio must be mostly silent and speak only at topic boundaries (#4/#5); a per-turn conversational brain fights that. Requires an inbound "speak this" channel + removing pulse's per-turn LLM from the speaking path. See implementation.md §3.4–3.5. |

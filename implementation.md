@@ -99,29 +99,99 @@ is the natural home for the **erase/refine animations**.
 |--------------------|---------------------------------------------------------------------|
 | Whiteboard canvas  | **Fork tldraw**, build custom node types / behaviors on top. (License is a non-issue for a hackathon; tldraw is the stronger engine vs. Excalidraw.) |
 | App framework      | **Next.js** (see Next.js caveat above). |
-| Voice agent        | **Existing, pre-built** (owner already built it). To be **integrated**. Contract TBD — see §3. |
-| LLM / agent runtime| Default to latest Claude models (**Opus 4.8** `claude-opus-4-8` / **Sonnet 4.6** `claude-sonnet-4-6`) unless a reason emerges otherwise. |
-| STT / TTS          | Owned by the existing voice agent (see §3).                         |
-| Observability      | **Sentry** (`@sentry/nextjs` v10) — errors, tracing, and **agent call/usage observability** (see §4). |
-| Backend / orchestration | TBD.                                                           |
-| Persistence        | TBD (raw transcripts are the durable source of truth — storage model not yet chosen). |
+| Voice agent        | **Our fork** of the pulse **Pipecat 1.3.0** scaffold in `agent/` (`bot.py`). Reference/starting point we own and rewrite — not an external component. Audio I/O, turn-taking, persistence, Sentry over **SmallWebRTC**. See §3. |
+| STT + turn-taking  | **Deepgram Flux** (`flux-general-en`) — STT *and* semantic end-of-turn in one service; backchannel tolerance via a min-words strategy. |
+| TTS                | **Cartesia Sonic-3** (`sonic-3`). Voice/speed/emotion knobs in `agent/tuning.py`. |
+| Voice LLM "brain"  | **OpenAI-compatible**, resolved by precedence: Vercel AI Gateway → NVIDIA NIM → ZAI fallback. Model comes from the session payload `model` field. **Not Claude by default** (but AI Gateway can route to Claude). Distinct from our structuring/spawner/inference agents. |
+| Our agent runtime  | Default to latest Claude models (**Opus 4.8** `claude-opus-4-8` / **Sonnet 4.6** `claude-sonnet-4-6`) for the Inference Layer / Structuring / Spawner agents. |
+| Observability      | **Sentry** — `@sentry/nextjs` v10 in the web app, `sentry_sdk` in the Python agent (shares the same DSN). Errors, tracing, and **agent call/usage observability** (see §4). |
+| Persistence        | **Supabase** (Postgres + PostgREST). The voice agent writes finalized turns to `messages(conversation_id, role, content)` with the end-user's JWT so **RLS** applies. Raw transcripts are the durable source of truth (see [prd.md](./prd.md) §1.4). |
+| Backend / orchestration | Next.js app + the Python voice agent process; canvas-op orchestration (Inference → agents → Canvas Writer) is ours to build. |
 
 ---
 
-## 3. Voice agent integration — OPEN
+## 3. Voice agent — fork base (pulse)
 
-The voice agent already exists and will be dropped in. The integration **contract is
-not yet defined.** To resolve once the code is provided:
+`agent/` (Pipecat 1.3.0, ported from "Pulse") is **scaffolding / reference we fork
+from, not a fixed external component we integrate against.** The real voice
+implementation is **ours** — we own the code and modify it freely. What follows is the
+behavior we **inherit from the fork** (the starting point), and what we change. Source
+of truth for the inherited behavior is the `bot.py` docstring and `agent/README.md`.
 
-- **What it emits:** partial vs. finalized transcript chunks? event format? timing?
-- **What it accepts:** can we push it text to *speak* (for clarifying questions / gap
-  prompts)? Or is talk-back not wired yet?
-- **Who owns the conversation:** does the voice agent decide what to say on its own
-  (black box), or does our inference layer drive the talk-back? (Matters so the agent
-  and our system don't both try to "talk".)
-- **STT/TTS providers** live inside it — document them once known.
+### 3.1 Session handshake (inherited)
 
-➡️ **Action:** owner will share the voice-agent code; update this section and §2 then.
+The browser POSTs its WebRTC offer to **`POST http://localhost:7860/api/offer`** as
+JSON `{ sdp, type, request_data: { session: {...} } }` (pipecat client-js sends the
+key as `requestData`; the agent normalizes it). The `session` payload — all fields
+optional:
+
+```json
+{ "conversationId": "...", "accessToken": "...", "supabaseUrl": "...",
+  "supabaseAnonKey": "...", "systemPrompt": "...", "opener": "...", "model": "..." }
+```
+
+- Without `systemPrompt`, a neutral fallback prompt is used.
+- Without the four Supabase fields, **persistence is skipped** (pipeline still runs).
+- On connect the agent **speaks the `opener`** (via `TTSSpeakFrame`, bypassing the
+  LLM) and seeds it into context, then listens.
+
+### 3.2 What it emits
+
+- **Live captions (our live verbatim feed):** the pipeline auto-installs an
+  `RTVIProcessor` + `RTVIObserver`, streaming user/bot transcription events to the
+  client **over the WebRTC data channel**. This is the path for writing verbatim nodes
+  to the canvas live (see [prd.md](./prd.md) §1.1).
+- **Finalized turns → Supabase:** on `on_user_turn_stopped` / `on_assistant_turn_stopped`
+  the agent fire-and-forget POSTs to `{supabaseUrl}/rest/v1/messages` with the user's
+  JWT (RLS-safe). The opener is *not* persisted by the agent.
+
+### 3.3 Turn-taking granularity
+
+Deepgram Flux decides **utterance-level** turn boundaries (semantic EndOfTurn +
+backchannel tolerance). Our **topic boundaries** (see [prd.md](./prd.md) §1.2) are a
+higher-level concept we compute on top of the utterance stream — the agent does not
+know about topics.
+
+### 3.4 Talk-back ownership — DECIDED: our system is the brain
+
+The current pulse pipeline is a **per-turn conversational companion**: after every
+user turn its own OpenAI-compatible LLM brain generates a spoken reply. Curio's design
+(decisions #4/#5 in [prd.md](./prd.md)) wants the bot **mostly silent**, talking back
+only *sometimes* and only at **pauses/topic boundaries**, with our **Inference Layer**
+deciding if/what to say.
+
+**Decision (#18):** pulse is reduced to an **STT/TTS transport**; Curio is the brain.
+
+```
+Flux STT --> transcription stream --> [Inference Layer + agents]
+                                              |  decides if/what to say
+                                              v
+                          pulse.speak(text)  -->  Cartesia TTS
+```
+
+- pulse's **per-turn LLM brain is removed from the speaking path** — it no longer
+  auto-replies each turn.
+- We consume the transcription stream (RTVI / persisted turns, §3.2) as the canvas feed.
+- **All** talk-back is driven by us: the Inference Layer decides at topic boundaries,
+  then we push text for the agent to speak.
+
+### 3.5 What we change in our fork
+
+Since the agent is **ours to rewrite** (not an external API), these are direct edits to
+the forked pipeline, not an integration shim:
+
+1. **Add an inbound "speak this" channel.** Today only the `opener` injects a
+   `TTSSpeakFrame`. Generalize that into an on-demand path (e.g. a control message over
+   the WebRTC data channel, or a small local endpoint) so Curio can make the agent speak
+   arbitrary text mid-session.
+2. **Decouple the per-turn LLM from the speaking path.** Drop `OpenAILLMService` + the
+   assistant aggregator from the pipeline (or keep context aggregation but stop it
+   auto-replying). Keep Flux STT, turn detection, and the transcription stream intact.
+3. **Preserve persistence + observability.** The Supabase user-turn writes (§3.2) and
+   the `voice.session` Sentry transaction (§4) stay; assistant-turn writes now reflect
+   only what *we* chose to speak.
+
+➡️ **Status:** §3.1–3.4 settled; §3.5 is the rewrite to-do once we build.
 
 ---
 
@@ -131,6 +201,12 @@ Sentry is our single tool for **observing every LLM/agent call** — latency, fa
 and token usage — in addition to general app error monitoring. The SDK wiring
 (three `Sentry.init()` calls, source maps, tunnel route) is documented in
 [CLAUDE.md](./CLAUDE.md); this section covers **how to instrument the agent pipeline.**
+
+> The **voice agent already emits Sentry** from Python (`sentry_sdk`): each session
+> runs inside a `voice.session` transaction with `service=voice-agent`, `llm.model`,
+> and `conversation.id` tags, and it shares the app's DSN (falls back to
+> `NEXT_PUBLIC_SENTRY_DSN`). Instrument **our** Inference/Structuring/Spawner/Canvas
+> agents (below) into the **same** project so a study session is traceable end-to-end.
 
 ### 4.1 Wrap every agent call in a span
 
@@ -189,7 +265,6 @@ Instrument these spans:
 
 ## 5. Open technical questions
 
-- **Voice-agent contract** (the whole of §3).
 - **Topic-tree representation** — how the implicit hierarchy is stored and kept in sync
   with the spatial canvas.
 - **Region reservation mechanics** — what defines a region's bounds; what happens when a
