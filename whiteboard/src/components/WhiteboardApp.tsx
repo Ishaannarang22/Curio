@@ -6,10 +6,11 @@ import { MindMapNodeUtil } from '../shapes/MindMapNode'
 import { FlowNodeUtil } from '../shapes/FlowNode'
 import { ExplanationCardUtil } from '../shapes/ExplanationCard'
 import { ImageNodeUtil } from '../shapes/ImageNode'
+import { MarkdownDocUtil } from '../shapes/MarkdownDoc'
 import { setEditor, connectWebSocket } from '../lib/commandQueue'
 import { TutorPanel } from './TutorPanel'
 
-const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil]
+const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil, MarkdownDocUtil]
 
 export function WhiteboardApp() {
   const handleMount = useCallback((editor: Editor) => {

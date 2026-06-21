@@ -84,6 +84,48 @@ const SEQUENCES = {
     },
   ],
 
+  markdown: [
+    { action: 'clearBoard', payload: {} },
+    {
+      action: 'addMarkdown',
+      payload: {
+        id: 'md1',
+        markdown: [
+          '# Photosynthesis',
+          '',
+          'Plants convert **light energy** into _chemical energy_ stored as glucose.',
+          '',
+          '## The two stages',
+          '',
+          '1. **Light reactions** — in the thylakoid membrane',
+          '2. **Calvin cycle** — in the stroma',
+          '',
+          '> Net equation: `6CO₂ + 6H₂O + light → C₆H₁₂O₆ + 6O₂`',
+          '',
+          '### Inputs vs. outputs',
+          '',
+          '| Inputs | Outputs |',
+          '| --- | --- |',
+          '| Carbon dioxide | Glucose |',
+          '| Water | Oxygen |',
+          '| Light | — |',
+          '',
+          '### Checklist',
+          '',
+          '- [x] Absorb light',
+          '- [x] Split water',
+          '- [ ] Fix carbon',
+          '',
+          '```python',
+          'def photosynthesis(co2, h2o, light):',
+          '    return glucose, oxygen',
+          '```',
+        ].join('\n'),
+        position: { x: 120, y: 100 },
+      },
+    },
+  ],
+
   image: [
     { action: 'clearBoard', payload: {} },
     {
@@ -162,6 +204,7 @@ const HTML = `<!DOCTYPE html>
     <button class="btn-mindmap" onclick="fire('mindmap')">🧠 Mind Map<br/><small style="font-weight:400;opacity:.8">Photosynthesis radial layout</small></button>
     <button class="btn-flow" onclick="fire('flowchart')">🔷 Flowchart<br/><small style="font-weight:400;opacity:.8">Voice app pipeline (ELK layout)</small></button>
     <button class="btn-explain" onclick="fire('explanation')">📝 Explanation Card<br/><small style="font-weight:400;opacity:.8">Typewriter reveal + append</small></button>
+    <button class="btn-explain" onclick="fire('markdown')">📄 Markdown Doc<br/><small style="font-weight:400;opacity:.8">Notion-style editor — double-tap to edit, / for commands</small></button>
     <button class="btn-image" onclick="fire('image')">🖼 Request Image<br/><small style="font-weight:400;opacity:.8">Shows loading shimmer</small></button>
     <button class="btn-image" onclick="fire('imageResolve')">✅ Resolve Image<br/><small style="font-weight:400;opacity:.8">Cross-fade placeholder → real</small></button>
     <button class="btn-mindmap" onclick="fire('highlight')">✨ Highlight Node<br/><small style="font-weight:400;opacity:.8">Pulse mm1 + pan camera</small></button>
