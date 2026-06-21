@@ -429,10 +429,11 @@ async def bot(runner_args: RunnerArguments):
 
     # --- Caller channel: the board-writing brain (dual-channel design).
     # A pass-through observer of final transcripts. Its own isolated brain +
-    # context; fire-and-forget so it never blocks the speaking path. Writes a
-    # living Markdown doc to the tldraw whiteboard via the mock-server bridge.
+    # context; fire-and-forget so it never blocks the speaking path. Writes
+    # structured artifacts (Phase 1–3) to the tldraw whiteboard via the bridge.
     # Self-disables (voice runs untouched) when no caller key / board bridge.
-    board_writer = BoardWriter()
+    # M3: pass session (conversationId) for Redis namespacing.
+    board_writer = BoardWriter(session=session_ctx.get("conversationId") or "default")
 
     pipeline = Pipeline(
         [
