@@ -25,6 +25,7 @@ const ALLOWED_ACTIONS = new Set([
   'removeNode',
   'addMindMap',
   'addFlowchart',
+  'addDiagram',
   'requestImage',
   'resolveImage',
   'highlightNode',
@@ -116,6 +117,13 @@ function isValidCommand(cmd: unknown): cmd is Command {
       return isId(p.id) && isString(p.centerLabel, MAX_LABEL_CHARS) && Array.isArray(p.branches) && p.branches.length <= MAX_ITEMS && p.branches.every((b) => isRecord(b) && isId(b.id) && isString(b.label, MAX_LABEL_CHARS)) && isPosition(p.position)
     case 'addFlowchart':
       return isId(p.id) && Array.isArray(p.steps) && p.steps.length <= MAX_ITEMS && p.steps.every((s) => isRecord(s) && isId(s.id) && isString(s.label, MAX_LABEL_CHARS) && (s.subtitle === undefined || isString(s.subtitle, MAX_LABEL_CHARS))) && isPosition(p.position)
+    case 'addDiagram':
+      return isId(p.id) &&
+        Array.isArray(p.nodes) && p.nodes.length <= MAX_ITEMS &&
+        p.nodes.every((n) => isRecord(n) && isId(n.id) && isString(n.label, MAX_LABEL_CHARS)) &&
+        Array.isArray(p.edges) && p.edges.length <= MAX_ITEMS &&
+        p.edges.every((e) => isRecord(e) && isId(e.fromId) && isId(e.toId) && (e.label === undefined || isString(e.label, MAX_LABEL_CHARS))) &&
+        isPosition(p.position)
     case 'requestImage':
       return isId(p.id) && isString(p.prompt, MAX_LABEL_CHARS) && isPosition(p.position)
     case 'resolveImage':
@@ -210,6 +218,16 @@ async function execute(cmd: Command) {
 
       case 'addFlowchart':
         await api.addFlowchart(editor, p.steps as { id: string; label: string; subtitle?: string }[], p.position as { x: number; y: number } | undefined)
+        break
+
+      case 'addDiagram':
+        await api.addDiagram(
+          editor,
+          p.id as string,
+          p.nodes as { id: string; label: string }[],
+          p.edges as { fromId: string; toId: string; label?: string }[],
+          p.position as { x: number; y: number } | undefined,
+        )
         break
 
       case 'requestImage':

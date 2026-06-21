@@ -139,7 +139,9 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.workers.runner import WorkerRunner
 
 import tuning
-from board_writer import BoardWriter
+from board_state import BoardState, InMemoryBoardState
+from structuring_agent import StructuringAgent
+from topic_boundary import TopicBoundaryProcessor
 
 # Load env from agent/.env (optional) AND the repo root .env.local, so the
 # keys already configured for the Next.js app (DEEPGRAM_API_KEY,
@@ -472,19 +474,32 @@ async def bot(runner_args: RunnerArguments):
         ),
     )
 
-    # --- Caller channel: the board-writing brain (dual-channel design).
-    # A pass-through observer of final transcripts. Its own isolated brain +
-    # context; fire-and-forget so it never blocks the speaking path. Writes
-    # structured artifacts (Phase 1–3) to the tldraw whiteboard via the bridge.
-    # Self-disables (voice runs untouched) when no caller key / board bridge.
-    # M3: pass session (conversationId) for Redis namespacing.
-    board_writer = BoardWriter(session=session_ctx.get("conversationId") or "default")
+    # --- Caller channel: topic boundary detection + Structuring Agent (dual-channel).
+    # The boundary processor observes the Flux transcript stream, places each turn in
+    # a recursive topic tree (prd.md §1.2–1.3), mirrors live verbatim raw to the board,
+    # and fires a SealEvent when a topic seals. The StructuringAgent consumes that seal
+    # (its on_seal seam) and turns the sealed raw into a flowchart/diagram/mindmap. They
+    # SHARE one BoardState so placement avoids overlap and a render replaces raw in
+    # place. Both self-disable without an LLM key; neither ever blocks the speaking path.
+    session_id = session_ctx.get("conversationId") or "default"
+    if os.getenv("BOARD_STATE_BACKEND", "memory").lower() == "redis":
+        board_state: Any = BoardState(
+            redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"), session=session_id
+        )
+    else:
+        board_state = InMemoryBoardState(session=session_id)
+    await board_state.connect()
+
+    structuring = StructuringAgent(session=session_id, state=board_state)
+    topic_boundary = TopicBoundaryProcessor(
+        session=session_id, state=board_state, on_seal=structuring.on_seal
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),  # browser mic audio (SmallWebRTC)
             stt,  # Deepgram Flux: STT + end-of-turn
-            board_writer,  # CALLER channel: mirror speech -> whiteboard (observer)
+            topic_boundary,  # CALLER channel: topic boundary detection (observer)
             ctx_aggregators.user(),  # user turn -> context (+ turn controller)
             llm,  # OpenAI-compatible chat completion
             tts,  # Cartesia speech synthesis
@@ -542,7 +557,9 @@ async def bot(runner_args: RunnerArguments):
         sentry_sdk.capture_exception(e)
         raise
     finally:
-        await board_writer.close()
+        await topic_boundary.close()   # seals the trailing topic → fires structuring
+        await structuring.close()      # drain queued seals, then close
+        await board_state.aclose()     # owner of the shared state closes it
         if store:
             await store.close()
 
@@ -640,6 +657,16 @@ def _patch_stun_servers():
 
 
 if __name__ == "__main__":
+    # Windows consoles default to cp1252, which can't encode the emoji pipecat's
+    # runner prints on startup ("🚀 Bot ready!") — that UnicodeEncodeError crashes
+    # the process before it binds :7860. Force UTF-8 on the std streams first.
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
     from pipecat.runner.run import main, app as runner_app
 
     _init_sentry()

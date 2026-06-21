@@ -143,7 +143,8 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
       // tooltip; no need to also trip the Next.js dev error overlay.
       console.warn('[VoiceConnect] Connection failed:', err)
       setStatus('error')
-      setErrorMsg(err instanceof Error ? err.message : String(err))
+      // A thrown connection failure is genuinely fatal, so surface its text.
+      setErrorMsg(parseAgentError(err).text)
       clientRef.current = null
     }
   }, [agentBase, session])

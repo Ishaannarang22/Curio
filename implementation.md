@@ -65,6 +65,42 @@ The "pipeline" between the voice agent and the specialized agents. Resolved topo
 - Chooses the form from the content's shape; the student can override by voice. See
   [prd.md](./prd.md) §"Structured output requirements".
 
+**Implemented** (`agent/structuring_agent.py`, fired by the boundary processor's
+`on_seal` seam). Two stages per seal, both Sonnet 4.6 (`ROUTER_MODEL` /
+`STRUCTURING_MODEL`, env-overridable):
+
+1. **Router** — reads `SealEvent.raw` → `{needs_restructure, format}` where
+   `format ∈ {flowchart, diagram, mindmap}`. `needs_restructure=false` → leave the
+   verbatim raw block untouched (no render).
+2. **Renderer** — **forced** to the locked format's composite tool, builds the
+   artifact from the raw. The block id is pinned to the node id (not the model's
+   echo) so the artifact replaces the raw block in place.
+
+Seal kinds: `leaf` → one artifact at the node's block; `parent` → **MERGE** to one
+consolidated artifact, then remove the provisional child blocks
+(`SealEvent.descendant_ids`). Always **write-then-remove** (no blank flash).
+
+Runtime: `on_seal` enqueues and returns instantly; a **single background worker**
+drains the queue sequentially — keeping the boundary hot path unblocked and
+serializing every board write (a de-facto single Canvas Writer until §1.5 lands). It
+shares **one `BoardState`** with the boundary processor so placement avoids
+overlapping un-structured raw and replacement is in-place. Renders direct to the
+bridge via `execute_tool_call`. Each seal is one `gen_ai.invoke_agent` Sentry span
+(`curio.agent="structuring"`, `curio.topic_id`, token usage). See §4.
+
+**`make_diagram`** (new, 16th board tool): a free-form relationship graph
+(`nodes[]` + labelled `edges[]`) laid out client-side by a **general d3-force** pass —
+distinct from the mind-map's radial star and the flowchart's ELK sequence.
+
+**Non-overlap.** Every create tool now **estimates its footprint** (`estimate_size`)
+*before* placing — flowchart height ≈ steps, mind-map/diagram diameter ≈ node count,
+notes ≈ text length — and `resolve_placement` lattice-packs against the real stored
+bboxes (no more fixed `480×320` placeholder). Center-anchored formats (mind-map,
+diagram) convert the packer's top-left slot to a centre so their spread stays inside
+the reserved region. (Geometry write-back from the board stays a later cosmetic
+refinement; an estimate is required up front anyway — you reserve space before the
+board lays the shape out.)
+
 ### 1.3 Spawner Agent
 
 - Runs **in parallel** with the Structuring Agent on the same sealed topic.
@@ -149,8 +185,28 @@ optional:
 
 Deepgram Flux decides **utterance-level** turn boundaries (semantic EndOfTurn +
 backchannel tolerance). Our **topic boundaries** (see [prd.md](./prd.md) §1.2) are a
-higher-level concept we compute on top of the utterance stream — the agent does not
-know about topics.
+higher-level concept computed on top of the utterance stream by a **per-turn topic
+classifier** running in the Python voice backend: each EndOfTurn utterance →
+`CONTINUE / DESCEND / SIBLING / ASCEND / RETURN` verdict against a recursive topic
+tree (fast/cheap model, Haiku-class — distinct from the Structuring Agent it fires).
+Sealing is semantic only (no timers); the trailing topic seals on session end. This
+classifier is the **hook that fires the Structuring Agent** (and, in parallel, the
+Spawner Agent). See [prd.md](./prd.md) §1.2–1.3 decisions #19–22.
+
+**Implemented (replaces the `board_writer.py` prototype's idle-timer model):**
+
+| Module | Role |
+| --- | --- |
+| `agent/topic_tree.py` | Pure, I/O-free recursive topic tree. Applies a verdict, attributes the utterance to the **destination** node, and emits `SealEvent`s (leaf seal → node's own raw; parent seal → whole-subtree raw). The semantics live here and are unit-tested exhaustively (`tests/test_topic_tree.py`). |
+| `agent/topic_classifier.py` | The cheap per-turn LLM classifier. One forced `emit_verdict` tool call per utterance; any error/ambiguity degrades to `CONTINUE` (a missed boundary is recoverable; a spurious seal is not). Haiku-class via the AI Gateway, `CLASSIFIER_MODEL`-overridable. |
+| `agent/topic_boundary.py` | `TopicBoundaryProcessor` — the pipecat observer wired into `bot.py` where `BoardWriter` used to sit. Per turn: classify → apply → mirror the active node's verbatim raw to the board (prd §1.1) → fire each `SealEvent` through the **seal seam** (`on_seal`). |
+
+The **seal seam** (`on_seal: (SealEvent) -> awaitable`) is the Structuring Agent's
+trigger contract. Until that agent is built it defaults to a logger, so the boundary
+engine runs live and observable but the board shows raw per-topic blocks rather than
+artifacts (intentional, temporary regression). `board_writer.py` stays on disk as a
+harvestable prototype (BoardState / BridgePoster / tool schemas) but is **no longer
+wired** into the pipeline.
 
 ### 3.4 Talk-back ownership — DECIDED: our system is the brain
 

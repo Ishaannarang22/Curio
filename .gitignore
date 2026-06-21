@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+whiteboard/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -23,6 +24,7 @@
 # misc
 .DS_Store
 *.pem
+.playwright-mcp/
 
 # debug
 npm-debug.log*
