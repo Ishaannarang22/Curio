@@ -34,9 +34,10 @@ tool-driven.** There is zero tool-calling in the codebase today:
   move only — it cannot make mind maps, flowcharts, images, etc.
 
 **The transport (don't change this part):** the agent POSTs
-`{action, payload}` to `http://localhost:8081/send` → `whiteboard/mock-server.js`
-broadcasts over `ws://localhost:8080` → `whiteboard/src/lib/commandQueue.ts`
-executes via `whiteboard/src/lib/boardApi.ts`. Converting to tool calls is
+`{action, payload}` to `http://localhost:8081/send` → `scripts/whiteboard-mock-server.mjs`
+(run via `npm run whiteboard:mock`) broadcasts over `ws://localhost:8080` →
+`components/whiteboard/lib/commandQueue.ts` executes via
+`components/whiteboard/lib/boardApi.ts`. Converting to tool calls is
 **agent-side only**: give an LLM a tool schema for the actions below and route
 each `tool_call` to that same POST.
 
