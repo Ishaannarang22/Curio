@@ -42,26 +42,29 @@
   /* The one accent — active tool + selection only. Appears nowhere else. */
   --accent: #111827;
 
-  /* Purple — mind map */
-  --purple-tint: #f5f3ff;
-  --purple-border: #c4b5fd;
-  --purple-title: #6d28d9;
-  --purple-subtitle: #8b5cf6;
-  /* Blue — flow */
-  --blue-tint: #eff6ff;
-  --blue-border: #93c5fd;
-  --blue-title: #1d4ed8;
-  --blue-subtitle: #3b82f6;
-  /* Teal — explanation */
-  --teal-tint: #f0fdfa;
-  --teal-border: #5eead4;
-  --teal-title: #0f766e;
-  --teal-subtitle: #0d9488;
-  /* Pink — image */
-  --pink-tint: #fdf2f8;
-  --pink-border: #f9a8d4;
-  --pink-title: #be185d;
-  --pink-subtitle: #db2777;
+  /* Node families — neutral monochrome. Each keeps its slot (mind map / flow /
+     explanation / image) but reads as a hueless gray; cards are told apart by a
+     subtle step in tint/border, not by color. Titles use ink, subtitles muted. */
+  /* Mind map */
+  --purple-tint: #f7f7f8;
+  --purple-border: #d9dadf;
+  --purple-title: #16181d;
+  --purple-subtitle: #6b7280;
+  /* Flow */
+  --blue-tint: #f1f2f4;
+  --blue-border: #d1d4d9;
+  --blue-title: #16181d;
+  --blue-subtitle: #6b7280;
+  /* Explanation */
+  --teal-tint: #f5f5f6;
+  --teal-border: #d5d6db;
+  --teal-title: #16181d;
+  --teal-subtitle: #6b7280;
+  /* Image */
+  --pink-tint: #f8f8f9;
+  --pink-border: #dddee2;
+  --pink-title: #16181d;
+  --pink-subtitle: #6b7280;
 }
 
 /* ─── tldraw canvas: pure white, no grid, accent selection ───────────────────
@@ -200,7 +203,7 @@
 .curio-explain__body {
   font-size: var(--fs-sm);
   line-height: 1.55;
-  color: #134e4a;            /* teal-900 on teal-50 — AA */
+  color: #2b2f36;            /* neutral dark on light gray — AA */
   list-style: disc;
   margin: 0;
   padding-left: var(--sp-4);
@@ -228,7 +231,7 @@
   width: 100%;
   height: 100%;
   border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, var(--pink-tint) 25%, #fce7f3 50%, var(--pink-tint) 75%);
+  background: linear-gradient(90deg, var(--pink-tint) 25%, #eaeaec 50%, var(--pink-tint) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   display: flex;
@@ -384,11 +387,11 @@
   border-radius: 8px;
 }
 .curio-doc.is-highlighted {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(17, 24, 39, 0.06);
 }
 .curio-doc.is-editing {
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: inset 0 0 0 1.5px #6366f1, 0 6px 24px rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 0 0 1.5px #111827, 0 6px 24px rgba(15, 23, 42, 0.12);
 }
 
 /* ProseMirror surface */
@@ -414,7 +417,7 @@
 .curio-prose h2 { font-size: 1.4em; }
 .curio-prose h3 { font-size: 1.15em; }
 .curio-prose p { margin: 0.45em 0; }
-.curio-prose a.curio-link { color: #4f46e5; text-decoration: underline; cursor: pointer; }
+.curio-prose a.curio-link { color: #111827; text-decoration: underline; cursor: pointer; }
 .curio-prose strong { font-weight: 600; }
 .curio-prose em { font-style: italic; }
 .curio-prose ul, .curio-prose ol { margin: 0.45em 0; padding-left: 1.5em; }
@@ -437,7 +440,7 @@
   font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.85em;
   background: #f1f1f4;
-  color: #c2185b;
+  color: #374151;
   padding: 0.1em 0.35em;
   border-radius: 4px;
 }
@@ -445,8 +448,8 @@
   font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
   margin: 0.7em 0;
   padding: 0.8em 1em;
-  background: #1e1e2e;
-  color: #e4e4ef;
+  background: #1f2024;
+  color: #e6e6e8;
   border-radius: 8px;
   overflow-x: auto;
   font-size: 0.85em;
@@ -470,7 +473,7 @@
   vertical-align: top;
 }
 .curio-prose th { background: #f7f7f9; font-weight: 600; }
-.curio-prose .selectedCell { background: rgba(99, 102, 241, 0.12); }
+.curio-prose .selectedCell { background: rgba(17, 24, 39, 0.10); }
 
 /* Placeholder text (empty paragraph / heading) */
 .curio-prose p.is-editor-empty:first-child::before,
