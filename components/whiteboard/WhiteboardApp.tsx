@@ -18,15 +18,73 @@ import { ExplanationCardUtil } from './shapes/ExplanationCard'
 import { ImageNodeUtil } from './shapes/ImageNode'
 import { MarkdownDocUtil } from './shapes/MarkdownDoc'
 import { setEditor, connectWebSocket } from './lib/commandQueue'
+// M4 board-side Redis sync — best-effort, board still works if /api/board is down.
+import { setSession, fetchBoard, reportGeometry } from './lib/boardSync'
 
 const CUSTOM_SHAPE_UTILS = [MindMapNodeUtil, FlowNodeUtil, ExplanationCardUtil, ImageNodeUtil, MarkdownDocUtil]
 
-export function WhiteboardApp() {
+interface WhiteboardAppProps {
+  /** Session id used to namespace this board in Redis.
+   *  Defaults to the `?session=` URL param, or "default" if absent. */
+  session?: string
+}
+
+function getSessionFromUrl(): string {
+  if (typeof window === 'undefined') return 'default'
+  return new URLSearchParams(window.location.search).get('session') ?? 'default'
+}
+
+export function WhiteboardApp({ session }: WhiteboardAppProps = {}) {
   const handleMount = useCallback((editor: Editor) => {
     setEditor(editor)
-    connectWebSocket('ws://localhost:8080')
+    connectWebSocket('ws://localhost:8080') // keep existing WS connect untouched
+
     editor.updateInstanceState({ isDebugMode: false })
-  }, [])
+
+    // ── M4: derive session id and initialise the sync helper ─────────────────
+    const sess = session ?? getSessionFromUrl()
+    setSession(sess)
+
+    // ── M4: restore-on-mount — fetch board snapshot from Redis ───────────────
+    // v1 stub: blocks are fetched and logged; full shape rehydration is a
+    // TODO because deterministically re-creating tldraw shapes (including
+    // flowcharts/mindmaps with their arrow bindings) from raw BlockRecord data
+    // requires the same placement + binding logic as the original commandQueue
+    // ops and is a significant chunk of work best done in a follow-on pass.
+    // The geometry write-back path below IS fully wired and functional.
+    fetchBoard(sess).then((blocks) => {
+      if (blocks.length > 0) {
+        console.log('[boardSync] restored', blocks.length, 'block(s) from Redis for session', sess)
+        // TODO(M4-restore): iterate blocks and call commandQueue enqueue() for
+        // each record's type/content to rehydrate shapes on the board.
+      }
+    })
+
+    // ── M4: geometry write-back — report real post-layout bboxes to Redis ────
+    // Subscribe to tldraw store changes; when shapes move/resize, report their
+    // new bounding boxes. Debounced by boardSync (500 ms) so drag events coalesce.
+    const unsub = editor.store.listen(
+      (entry) => {
+        const updates: { id: string; bbox: { x: number; y: number; w: number; h: number } }[] = []
+        for (const [, change] of Object.entries(entry.changes.updated)) {
+          // change is a [prev, next] tuple — we only need the next value.
+          const next = (change as [unknown, unknown])[1] as { typeName?: string; id?: string; x?: number; y?: number; props?: { w?: number; h?: number } }
+          if (next?.typeName !== 'shape') continue
+          const { id, x, y, props } = next
+          if (typeof id !== 'string' || typeof x !== 'number' || typeof y !== 'number') continue
+          const w = typeof props?.w === 'number' ? props.w : 0
+          const h = typeof props?.h === 'number' ? props.h : 0
+          updates.push({ id, bbox: { x, y, w, h } })
+        }
+        if (updates.length > 0) reportGeometry(updates, sess)
+      },
+      { source: 'user', scope: 'document' }, // only track user-initiated changes
+    )
+
+    // Return value from useCallback is ignored by tldraw; store unsub for cleanup.
+    // We attach it to the editor instance as a non-reactive property.
+    ;(editor as Editor & { _boardSyncUnsub?: () => void })._boardSyncUnsub = unsub
+  }, [session])
 
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
