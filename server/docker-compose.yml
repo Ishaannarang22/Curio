@@ -1,0 +1,14 @@
+# Redis Stack server — plain Redis on 6379 plus the RedisJSON/Search modules
+# (we only need core data structures + Pub/Sub, but redis-stack means RedisJSON
+# is there if you later want nested document updates instead of the Hash).
+services:
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: curio-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
