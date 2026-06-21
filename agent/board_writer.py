@@ -577,7 +577,24 @@ class BoardWriter(FrameProcessor):
             data: dict[str, Any] = resp.json()
             choice = data.get("choices", [{}])[0]
             msg = choice.get("message", {})
-            return msg.get("tool_calls") or []
+            tool_calls = msg.get("tool_calls") or []
+            finish = choice.get("finish_reason")
+            if tool_calls:
+                names = [tc.get("function", {}).get("name") for tc in tool_calls]
+                logger.info(
+                    f"board-brain ({self._config['model']}): {len(tool_calls)} "
+                    f"tool_call(s) {names} finish={finish}"
+                )
+            else:
+                # No tools called — log what the model said instead so it's
+                # obvious WHY nothing reached the board (weak tool-caller, refusal,
+                # endpoint that ignores `tools`, etc.).
+                said = (msg.get("content") or "")[:300]
+                logger.warning(
+                    f"board-brain ({self._config['model']}) returned NO tool_calls "
+                    f"(finish={finish}). Model said instead: {said!r}"
+                )
+            return tool_calls
         except Exception as exc:
             logger.error(f"BoardWriter _call_llm error: {exc}")
             sentry_sdk.capture_exception(exc)
