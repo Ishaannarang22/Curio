@@ -30,6 +30,9 @@ function CrossFadeImage({ url }: { url: string }) {
   }, [url])
 
   return (
+    // Remote/generated image URLs are command-driven, so next/image cannot know
+    // their origins without a server-side proxy or allowlist.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       className="curio-image__media"
       src={url}

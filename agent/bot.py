@@ -105,6 +105,7 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 import httpx
@@ -146,6 +147,7 @@ from board_writer import BoardWriter
 _AGENT_DIR = Path(__file__).resolve().parent
 load_dotenv(_AGENT_DIR / ".env")
 load_dotenv(_AGENT_DIR.parent / ".env.local")
+_MAX_OFFER_BODY_BYTES = 256 * 1024
 
 
 # -----------------------------------------------------------------------------
@@ -271,7 +273,7 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
     nvidia_key = os.getenv("NVIDIA_API_KEY")
 
     if gateway_key:
-        model = payload_model or os.getenv("AI_GATEWAY_MODEL") or "openai/gpt-4o-mini"
+        model = _allowed_model(payload_model, os.getenv("AI_GATEWAY_MODEL") or "openai/gpt-4o-mini")
         base_url = "https://ai-gateway.vercel.sh/v1"
         api_key = gateway_key
         logger.info(f"LLM: Vercel AI Gateway, model={model}")
@@ -290,7 +292,13 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
         base_url = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/")
         api_key = os.getenv("ZAI_API_KEY", "")
         model = os.getenv("ZAI_MODEL", "glm-5.1")
-        logger.info(f"LLM: OpenAI-compatible ({base_url}), model={model}")
+        # GLM reasons by default, leaking chain-of-thought into the spoken reply
+        # and adding seconds of dead air before the first token. Voice needs the
+        # instinctive answer — disable thinking. `thinking` is a non-standard
+        # param, so it rides in extra_body (the OpenAI SDK rejects unknown
+        # top-level kwargs).
+        extra = {"extra_body": {"thinking": {"type": "disabled"}}}
+        logger.info(f"LLM: OpenAI-compatible ({base_url}), model={model}, thinking off")
 
     sentry_sdk.set_tag("llm.model", model)
     return OpenAILLMService(
@@ -298,6 +306,29 @@ def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
         base_url=base_url,
         settings=OpenAILLMService.Settings(model=model, extra=extra),
     )
+
+
+def _allowed_model(requested_model: str | None, default_model: str) -> str:
+    allowed = {
+        m.strip()
+        for m in os.getenv("ALLOWED_LLM_MODELS", default_model).split(",")
+        if m.strip()
+    }
+    if requested_model and requested_model in allowed:
+        return requested_model
+    if requested_model and requested_model not in allowed:
+        logger.warning(f"Rejected unapproved model from session payload: {requested_model!r}")
+    return default_model
+
+
+def _is_allowed_supabase_url(url: str) -> bool:
+    configured = os.getenv("SUPABASE_URL")
+    if configured:
+        return url.rstrip("/") == configured.rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    return parsed.hostname is not None and parsed.hostname.endswith(".supabase.co")
 
 
 # -----------------------------------------------------------------------------
@@ -328,8 +359,22 @@ async def bot(runner_args: RunnerArguments):
         )
 
     system_prompt = session_ctx.get("systemPrompt") or (
-        "You are a warm, natural voice companion having a real-time spoken "
-        "conversation. Keep replies to one to three short spoken sentences."
+        "You are Curio, a warm and curious study companion. The person talking to "
+        "you is a student explaining a topic out loud to understand it better — the "
+        "Feynman technique. Your job is to be the attentive, encouraging listener "
+        "that keeps them explaining.\n\n"
+        "Respond like a thoughtful tutor in real conversation: encourage them to keep "
+        "going in their own words; when something is vague, hand-wavy, or skipped, ask "
+        "one gentle, specific question to draw it out (\"What makes that happen?\", "
+        "\"Can you walk me through that step?\"); affirm good explanations and gently "
+        "surface gaps or contradictions. Stay curious and human.\n\n"
+        "As they speak, their explanation is automatically turned into a live visual "
+        "board — structured notes, diagrams, flowcharts — by another part of the "
+        "system. You do not control the board yourself; just teach and converse "
+        "naturally and trust it to capture the visuals.\n\n"
+        "Speak the way a real tutor would out loud: natural, flowing sentences, "
+        "usually two to four of them. Do NOT reply in clipped three- or four-word "
+        "fragments. No markdown, no lists, no emoji — this is spoken aloud."
     )
     opener = session_ctx.get("opener")
 
@@ -338,7 +383,7 @@ async def bot(runner_args: RunnerArguments):
     if all(
         session_ctx.get(k)
         for k in ("conversationId", "accessToken", "supabaseUrl", "supabaseAnonKey")
-    ):
+    ) and _is_allowed_supabase_url(str(session_ctx["supabaseUrl"])):
         store = MessageStore(
             supabase_url=session_ctx["supabaseUrl"],
             anon_key=session_ctx["supabaseAnonKey"],
@@ -429,10 +474,11 @@ async def bot(runner_args: RunnerArguments):
 
     # --- Caller channel: the board-writing brain (dual-channel design).
     # A pass-through observer of final transcripts. Its own isolated brain +
-    # context; fire-and-forget so it never blocks the speaking path. Writes a
-    # living Markdown doc to the tldraw whiteboard via the mock-server bridge.
+    # context; fire-and-forget so it never blocks the speaking path. Writes
+    # structured artifacts (Phase 1–3) to the tldraw whiteboard via the bridge.
     # Self-disables (voice runs untouched) when no caller key / board bridge.
-    board_writer = BoardWriter()
+    # M3: pass session (conversationId) for Redis namespacing.
+    board_writer = BoardWriter(session=session_ctx.get("conversationId") or "default")
 
     pipeline = Pipeline(
         [
@@ -527,6 +573,17 @@ class _OfferBodyCompat:
             while more:
                 message = await receive()
                 body += message.get("body", b"")
+                if len(body) > _MAX_OFFER_BODY_BYTES:
+                    await send({
+                        "type": "http.response.start",
+                        "status": 413,
+                        "headers": [(b"content-type", b"text/plain")],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": b"Request too large",
+                    })
+                    return
                 more = message.get("more_body", False)
             try:
                 data = json.loads(body or b"{}")
