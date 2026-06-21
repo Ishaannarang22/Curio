@@ -2,26 +2,24 @@
 
 /**
  * VoiceConnect — floating mic button that connects the browser to the Curio
- * Pipecat voice agent running at NEXT_PUBLIC_VOICE_AGENT_URL (default :7860).
+ * voice agent hosted on Pipecat Cloud (agent: curio-voice), over Daily WebRTC.
  *
  * Flow:
- *   1. User clicks "Talk" → we POST a WebRTC offer to :7860/api/offer with
- *      requestData = { session: { conversationId: <session> } }.
- *   2. SmallWebRTCTransport completes the ICE handshake with the Pipecat runner.
- *   3. Mic audio flows to the agent; TTS audio plays back in the browser.
- *   4. The agent's BoardWriter issues tool calls → BridgePoster POSTs to
- *      :3000/api/board/send → SSE stream → commandQueue → tldraw board.
+ *   1. User clicks "Talk" → we POST to the same-origin /api/voice/connect route.
+ *   2. That route calls Pipecat Cloud's start endpoint (holding the API key
+ *      server-side) and returns { dailyRoom, dailyToken } for a fresh session.
+ *   3. DailyTransport joins that room; mic audio flows to the agent and the
+ *      agent's TTS audio plays back in the browser.
+ *   4. The agent's BoardWriter issues tool calls → POSTs to /api/board/send →
+ *      SSE stream → commandQueue → tldraw board.
  *
- * No secrets are sent client-side. The NEXT_PUBLIC_VOICE_AGENT_URL is the only
- * cross-origin call (Pipecat runner has open CORS in dev).
- *
- * NOTE: mic→agent→board loop cannot be verified without a running agent
- * and a real microphone. This component compiles and renders correctly.
+ * No secrets are sent client-side: the Pipecat Cloud API key lives only in the
+ * server route's env. Works identically on localhost and Vercel.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { PipecatClient } from '@pipecat-ai/client-js'
-import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport'
+import { DailyTransport } from '@pipecat-ai/daily-transport'
 import { Orb, type OrbState } from './Orb'
 import './orb.css'
 
@@ -67,28 +65,27 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
   // incoming audio track to an <audio> element ourselves, or you hear nothing.
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const agentBase =
-    process.env.NEXT_PUBLIC_VOICE_AGENT_URL?.replace(/\/$/, '') ?? 'http://localhost:7860'
-
   const connect = useCallback(async () => {
     setEngaged(true) // dock the orb from now on, even after a later stop
     setStatus('connecting')
     setErrorMsg(null)
 
     try {
-      const transport = new SmallWebRTCTransport({
-        // webrtcRequestParams tells the transport where to POST the WebRTC offer.
-        // requestData carries the session payload; _OfferBodyCompat in bot.py
-        // rewrites requestData → request_data so runner_args.body['session'] works.
-        webrtcRequestParams: {
-          endpoint: `${agentBase}/api/offer`,
-          requestData: {
-            session: {
-              conversationId: session,
-            },
-          },
-        },
+      // Ask our server route to start a Pipecat Cloud session. It returns the
+      // Daily room credentials ({ dailyRoom, dailyToken }) — the API key stays
+      // server-side. DailyTransport consumes those field names directly.
+      const res = await fetch('/api/voice/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: { conversationId: session } }),
       })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}))
+        throw new Error(detail?.error || `Could not start session (${res.status})`)
+      }
+      const connectParams = await res.json()
+
+      const transport = new DailyTransport()
 
       const client = new PipecatClient({
         transport,
@@ -135,9 +132,10 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
 
       clientRef.current = client
 
-      // initDevices requests mic permissions, then connect() posts the offer.
+      // initDevices requests mic permissions, then connect() joins the Daily
+      // room. DailyTransport maps dailyRoom -> url and dailyToken -> token.
       await client.initDevices()
-      await client.connect()
+      await client.connect(connectParams)
     } catch (err) {
       // warn, not error — the failure is surfaced to the user via the orb
       // tooltip; no need to also trip the Next.js dev error overlay.
@@ -147,7 +145,7 @@ export function VoiceConnect({ session = 'default' }: VoiceConnectProps) {
       setErrorMsg(parseAgentError(err).text)
       clientRef.current = null
     }
-  }, [agentBase, session])
+  }, [session])
 
   const disconnect = useCallback(async () => {
     try {

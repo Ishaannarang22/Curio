@@ -1,0 +1,6 @@
+agent_name = "curio-voice"
+secret_set = "curio-voice-secrets"
+agent_profile = "agent-1x"
+
+[scaling]
+	min_agents = 1

@@ -6,12 +6,15 @@ requires-python = ">=3.10"
 dependencies = [
     # Pipecat with the extras we need:
     #   webrtc   -> SmallWebRTCTransport (aiortc based, peer-to-peer with the browser)
+    #   daily    -> DailyTransport (used when hosted on Pipecat Cloud)
     #   runner   -> the FastAPI development runner (serves /api/offer on :7860)
     #   deepgram -> Deepgram STT (Flux service with built-in end-of-turn detection)
     #   cartesia -> Cartesia TTS
     #   openai   -> OpenAI-compatible chat completions LLM service
     #   silero   -> Silero VAD (only used on the fallback STT path)
-    "pipecat-ai[webrtc,runner,deepgram,cartesia,openai,silero]>=0.0.100",
+    "pipecat-ai[webrtc,daily,runner,deepgram,cartesia,openai,silero]>=0.0.100",
+    # Pipecat Cloud runtime (managed Daily transport hosting / deploy target).
+    "pipecatcloud",
     "python-dotenv>=1.0",
     "httpx>=0.27",
     # Board harness: Redis board-state store (async client).

@@ -121,11 +121,11 @@ def _resolve_board_brain_config() -> dict[str, Any] | None:
         return {
             "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
             "api_key": deepseek_key,
-            # deepseek-v4-pro: native function-calling, OpenAI-compatible.
+            # deepseek-v4-flash: fast native function-calling, OpenAI-compatible.
             # (The legacy deepseek-chat/deepseek-reasoner aliases retire
             # 2026-07-24.) No "thinking" knob: that's GLM-specific and
-            # DeepSeek rejects it; V4 Pro defaults to its non-think mode.
-            "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"),
+            # DeepSeek rejects it; V4 defaults to its non-think mode.
+            "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
         }
     gateway_key = os.getenv("AI_GATEWAY_API_KEY")
     if gateway_key:

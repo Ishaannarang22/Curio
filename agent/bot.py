@@ -128,6 +128,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.daily.transport import DailyParams
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
@@ -272,10 +273,18 @@ def _strip_speech_markup(text: str) -> str:
 
 def _resolve_llm(payload_model: str | None) -> OpenAILLMService:
     extra: dict[str, Any] = {}
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY")
     gateway_key = os.getenv("AI_GATEWAY_API_KEY")
     nvidia_key = os.getenv("NVIDIA_API_KEY")
 
-    if gateway_key:
+    if deepseek_key:
+        # DeepSeek (OpenAI-compatible). `deepseek-v4-flash` is the fast,
+        # non-reasoning model — the instinctive reply voice needs.
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        api_key = deepseek_key
+        model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+        logger.info(f"LLM: DeepSeek ({base_url}), model={model}")
+    elif gateway_key:
         model = _allowed_model(payload_model, os.getenv("AI_GATEWAY_MODEL") or "openai/gpt-4o-mini")
         base_url = "https://ai-gateway.vercel.sh/v1"
         api_key = gateway_key
@@ -344,7 +353,14 @@ async def bot(runner_args: RunnerArguments):
     transport = await create_transport(
         runner_args,
         {
+            # Local dev: Pipecat dev runner serves SmallWebRTC on :7860.
             "webrtc": lambda: TransportParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+            ),
+            # Pipecat Cloud: the platform provisions a Daily room per session
+            # and selects this branch (create_transport keys off the runtime).
+            "daily": lambda: DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
             ),
